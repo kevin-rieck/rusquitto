@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/mqtt-codec"]
+resolver = "3"
