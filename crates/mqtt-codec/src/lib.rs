@@ -31,6 +31,29 @@ pub fn encode_variable_byte_integer(value: u32) -> Result<Vec<u8>, EncodeError> 
 pub enum DecodeError {
     Incomplete,
     Malformed,
+    PacketTooLarge,
+}
+
+pub fn decode_frame_length(input: &[u8], max_packet_size: usize) -> Result<usize, DecodeError> {
+    if input.is_empty() {
+        return Err(DecodeError::Incomplete);
+    }
+
+    let (remaining_length, encoded_length) = decode_variable_byte_integer(&input[1..])?;
+
+    let remaining_length =
+        usize::try_from(remaining_length).map_err(|_| DecodeError::PacketTooLarge)?;
+
+    let frame_length = 1_usize
+        .checked_add(encoded_length)
+        .and_then(|length| length.checked_add(remaining_length))
+        .ok_or(DecodeError::PacketTooLarge)?;
+
+    if frame_length > max_packet_size {
+        Err(DecodeError::PacketTooLarge)
+    } else {
+        Ok(frame_length)
+    }
 }
 
 pub fn decode_variable_byte_integer(input: &[u8]) -> Result<(u32, usize), DecodeError> {
@@ -156,5 +179,36 @@ mod tests {
                 Ok((value, encoded.len()))
             );
         }
+    }
+
+    #[test]
+    fn frame_length_is_calculated_from_header() {
+        assert_eq!(decode_frame_length(&[0xc0, 0x00], 1024), Ok(2));
+        assert_eq!(decode_frame_length(&[0x30, 0x03], 1024), Ok(5));
+    }
+
+    #[test]
+    fn incomplete_frame_header_is_reported() {
+        assert_eq!(decode_frame_length(&[], 1024), Err(DecodeError::Incomplete));
+        assert_eq!(
+            decode_frame_length(&[0x30], 1024),
+            Err(DecodeError::Incomplete)
+        );
+    }
+    #[test]
+    fn oversized_frame_is_rejected() {
+        assert_eq!(
+            decode_frame_length(&[0x30, 0x03], 4),
+            Err(DecodeError::PacketTooLarge)
+        );
+    }
+    #[test]
+    fn multi_byte_remaining_length_is_included_in_frame_length() {
+        assert_eq!(decode_frame_length(&[0x30, 0x80, 0x01], 1024), Ok(131));
+
+        assert_eq!(
+            decode_frame_length(&[0x30, 0x80, 0x01], 130),
+            Err(DecodeError::PacketTooLarge)
+        );
     }
 }
