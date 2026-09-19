@@ -334,4 +334,14 @@ mod tests {
             Ok(("MQTT", 6))
         );
     }
+
+    #[test]
+    fn utf8_strings_is_incomplete() {
+        assert_eq!(decode_utf8_string(&[0x00]), Err(DecodeError::Incomplete));
+
+        assert_eq!(
+            decode_utf8_string(&[0x00, 0x04, b'M', b'Q']),
+            Err(DecodeError::Incomplete)
+        );
+    }
 }
