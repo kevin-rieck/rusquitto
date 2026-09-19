@@ -159,6 +159,15 @@ pub fn decode_binary_data(input: &[u8]) -> Result<(&[u8], usize), DecodeError> {
     Ok((&input[2..end], end))
 }
 
+pub fn decode_u16(input: &[u8]) -> Result<(u16, usize), DecodeError> {
+    if input.len() < 2 {
+        return Err(DecodeError::Incomplete);
+    }
+
+    let value = u16::from_be_bytes([input[0], input[1]]);
+    Ok((value, 2))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -377,5 +386,15 @@ mod tests {
             decode_binary_data(&[0x00, 0x03, 0x00, 0xff, 0x80]),
             Ok((&[0x00, 0xff, 0x80][..], 5))
         );
+    }
+    #[test]
+    fn two_byte_integer_is_decoded() {
+        assert_eq!(decode_u16(&[0x00, 0x3c]), Ok((60, 2)));
+    }
+
+    #[test]
+    fn incomplete_two_byte_integer_is_reported() {
+        assert_eq!(decode_u16(&[]), Err(DecodeError::Incomplete));
+        assert_eq!(decode_u16(&[0x00]), Err(DecodeError::Incomplete));
     }
 }
