@@ -336,7 +336,7 @@ mod tests {
     }
 
     #[test]
-    fn utf8_strings_is_incomplete() {
+    fn incomplete_utf8_string_is_reported() {
         assert_eq!(decode_utf8_string(&[0x00]), Err(DecodeError::Incomplete));
 
         assert_eq!(
