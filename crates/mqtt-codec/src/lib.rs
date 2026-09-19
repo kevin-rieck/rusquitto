@@ -32,6 +32,7 @@ pub enum DecodeError {
     Incomplete,
     Malformed,
     PacketTooLarge,
+    Unsupported,
 }
 
 pub fn decode_frame_length(input: &[u8], max_packet_size: usize) -> Result<usize, DecodeError> {
@@ -166,6 +167,93 @@ pub fn decode_u16(input: &[u8]) -> Result<(u16, usize), DecodeError> {
 
     let value = u16::from_be_bytes([input[0], input[1]]);
     Ok((value, 2))
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Connect {
+    pub client_id: String,
+    pub clean_start: bool,
+    pub keep_alive: u16,
+}
+
+pub fn decode_connect(input: &[u8]) -> Result<Connect, DecodeError> {
+    let frame_length = decode_frame_length(input, usize::MAX)?;
+
+    if input.len() < frame_length {
+        return Err(DecodeError::Incomplete);
+    }
+
+    if input.len() > frame_length {
+        return Err(DecodeError::Malformed);
+    }
+
+    decode_packet_type(input[0])?;
+
+    let (_, remaining_length_bytes) = decode_variable_byte_integer(&input[1..])?;
+    let body_start = 1 + remaining_length_bytes;
+    let body = &input[body_start..frame_length];
+
+    let (protocol_name, protocol_name_bytes) = decode_utf8_string(body)?;
+
+    if protocol_name != "MQTT" {
+        return Err(DecodeError::Malformed);
+    }
+
+    let mut position = protocol_name_bytes;
+
+    let protocol_version = *body.get(position).ok_or(DecodeError::Incomplete)?;
+    position += 1;
+
+    if protocol_version != 5 {
+        return Err(DecodeError::Malformed);
+    }
+
+    let connect_flags = *body.get(position).ok_or(DecodeError::Incomplete)?;
+    if connect_flags & 0b0000_0001 != 0 {
+        return Err(DecodeError::Malformed);
+    }
+    let will_requested = connect_flags & 0b0000_0100 != 0;
+    let will_options = connect_flags & 0b0011_1000;
+
+    if !will_requested && will_options != 0 {
+        return Err(DecodeError::Malformed);
+    }
+
+    let will_qos = (connect_flags & 0b0001_1000) >> 3;
+    if will_qos == 3 {
+        return Err(DecodeError::Malformed);
+    }
+
+    if connect_flags & 0b1100_0100 != 0 {
+        return Err(DecodeError::Unsupported);
+    }
+
+    position += 1;
+
+    let clean_start = connect_flags & 0b0000_0010 != 0;
+
+    let (keep_alive, keep_alive_bytes) = decode_u16(&body[position..])?;
+    position += keep_alive_bytes;
+
+    let (property_length, property_length_bytes) = decode_variable_byte_integer(&body[position..])?;
+    position += property_length_bytes;
+
+    if property_length != 0 {
+        return Err(DecodeError::Unsupported);
+    }
+
+    let (client_id, client_id_bytes) = decode_utf8_string(&body[position..])?;
+    position += client_id_bytes;
+
+    if position != body.len() {
+        return Err(DecodeError::Malformed);
+    }
+
+    Ok(Connect {
+        client_id: client_id.to_owned(),
+        clean_start,
+        keep_alive,
+    })
 }
 
 #[cfg(test)]
@@ -396,5 +484,82 @@ mod tests {
     fn incomplete_two_byte_integer_is_reported() {
         assert_eq!(decode_u16(&[]), Err(DecodeError::Incomplete));
         assert_eq!(decode_u16(&[0x00]), Err(DecodeError::Incomplete));
+    }
+
+    #[test]
+    fn minimal_connect_packet_is_decoded() {
+        let frame = [
+            0x10, 0x10, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3c, 0x00, 0x00,
+            0x03, b'a', b'b', b'c',
+        ];
+
+        assert_eq!(
+            decode_connect(&frame),
+            Ok(Connect {
+                client_id: "abc".to_owned(),
+                clean_start: true,
+                keep_alive: 60,
+            })
+        );
+    }
+
+    #[test]
+    fn connect_reserved_flag_is_malformed() {
+        let frame = [
+            0x10, 0x10, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x03, 0x00, 0x3c, 0x00, 0x00,
+            0x03, b'a', b'b', b'c',
+        ];
+
+        assert_eq!(decode_connect(&frame), Err(DecodeError::Malformed));
+    }
+
+    #[test]
+    fn connect_with_will_is_unsupported() {
+        let frame = [
+            0x10, 0x10, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x06, 0x00, 0x3c, 0x00, 0x00,
+            0x03, b'a', b'b', b'c',
+        ];
+
+        assert_eq!(decode_connect(&frame), Err(DecodeError::Unsupported));
+    }
+
+    #[test]
+    fn connect_with_username_is_unsupported() {
+        let frame = [
+            0x10, 0x10, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x82, 0x00, 0x3c, 0x00, 0x00,
+            0x03, b'a', b'b', b'c',
+        ];
+
+        assert_eq!(decode_connect(&frame), Err(DecodeError::Unsupported));
+    }
+
+    #[test]
+    fn connect_with_password_is_unsupported() {
+        let frame = [
+            0x10, 0x10, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x42, 0x00, 0x3c, 0x00, 0x00,
+            0x03, b'a', b'b', b'c',
+        ];
+
+        assert_eq!(decode_connect(&frame), Err(DecodeError::Unsupported));
+    }
+
+    #[test]
+    fn will_qos_without_will_is_malformed() {
+        let frame = [
+            0x10, 0x10, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x0a, 0x00, 0x3c, 0x00, 0x00,
+            0x03, b'a', b'b', b'c',
+        ];
+
+        assert_eq!(decode_connect(&frame), Err(DecodeError::Malformed));
+    }
+
+    #[test]
+    fn will_qos_three_is_malformed() {
+        let frame = [
+            0x10, 0x10, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x1e, 0x00, 0x3c, 0x00, 0x00,
+            0x03, b'a', b'b', b'c',
+        ];
+
+        assert_eq!(decode_connect(&frame), Err(DecodeError::Malformed));
     }
 }
