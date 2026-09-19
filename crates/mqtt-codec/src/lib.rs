@@ -117,6 +117,18 @@ impl FrameDecoder {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub enum PacketType {
+    Connect,
+}
+
+pub fn decode_packet_type(byte: u8) -> Result<PacketType, DecodeError> {
+    match byte >> 4 {
+        1 if byte & 0b0000_1111 == 0 => Ok(PacketType::Connect),
+        _ => Err(DecodeError::Malformed),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -283,5 +295,15 @@ mod tests {
         let mut decoder = FrameDecoder::new(4);
         decoder.push(&[0x30, 0x03]);
         assert_eq!(decoder.next_frame(), Err(DecodeError::PacketTooLarge));
+    }
+
+    #[test]
+    fn connect_packet_type_is_decoded() {
+        assert_eq!(decode_packet_type(0x10), Ok(PacketType::Connect));
+    }
+
+    #[test]
+    fn connect_with_non_zero_flags_is_malformed() {
+        assert_eq!(decode_packet_type(0x11), Err(DecodeError::Malformed));
     }
 }
