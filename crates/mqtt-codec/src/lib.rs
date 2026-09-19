@@ -84,6 +84,39 @@ fn has_more_bytes(byte: u8) -> bool {
     byte & 0b1000_0000 != 0
 }
 
+pub struct FrameDecoder {
+    buffer: Vec<u8>,
+    max_packet_size: usize,
+}
+
+impl FrameDecoder {
+    pub fn new(max_packet_size: usize) -> Self {
+        Self {
+            buffer: Vec::new(),
+            max_packet_size,
+        }
+    }
+
+    pub fn push(&mut self, input: &[u8]) {
+        self.buffer.extend_from_slice(input);
+    }
+
+    pub fn next_frame(&mut self) -> Result<Option<Vec<u8>>, DecodeError> {
+        let frame_length = match decode_frame_length(&self.buffer, self.max_packet_size) {
+            Ok(length) => length,
+            Err(DecodeError::Incomplete) => return Ok(None),
+            Err(error) => return Err(error),
+        };
+
+        if self.buffer.len() < frame_length {
+            return Ok(None);
+        }
+
+        let frame = self.buffer.drain(..frame_length).collect();
+        Ok(Some(frame))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,5 +243,26 @@ mod tests {
             decode_frame_length(&[0x30, 0x80, 0x01], 130),
             Err(DecodeError::PacketTooLarge)
         );
+    }
+
+    #[test]
+    fn fragmented_frame_waits_for_remaining_bytes() {
+        let mut decoder = FrameDecoder::new(1024);
+
+        decoder.push(&[0xc0]);
+        assert_eq!(decoder.next_frame(), Ok(None));
+
+        decoder.push(&[0x00]);
+        assert_eq!(decoder.next_frame(), Ok(Some(vec![0xc0, 0x00])));
+    }
+
+    #[test]
+    fn coalesced_frames_are_decoded_individually() {
+        let mut decoder = FrameDecoder::new(1024);
+
+        decoder.push(&[0xc0, 0x00, 0xc0, 0x00]);
+        assert_eq!(decoder.next_frame(), Ok(Some(vec![0xc0, 0x00])));
+        assert_eq!(decoder.next_frame(), Ok(Some(vec![0xc0, 0x00])));
+        assert_eq!(decoder.next_frame(), Ok(None));
     }
 }
