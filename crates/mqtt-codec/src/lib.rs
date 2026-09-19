@@ -146,6 +146,10 @@ pub fn decode_utf8_string(input: &[u8]) -> Result<(&str, usize), DecodeError> {
         Err(_) => return Err(DecodeError::Malformed),
     };
 
+    if value.contains('\0') {
+        return Err(DecodeError::Malformed);
+    }
+
     Ok((value, end))
 }
 
@@ -342,6 +346,22 @@ mod tests {
         assert_eq!(
             decode_utf8_string(&[0x00, 0x04, b'M', b'Q']),
             Err(DecodeError::Incomplete)
+        );
+    }
+
+    #[test]
+    fn invalid_utf8_string_is_malformed() {
+        assert_eq!(
+            decode_utf8_string(&[0x00, 0x02, 0xc3, 0x28]),
+            Err(DecodeError::Malformed)
+        );
+    }
+
+    #[test]
+    fn null_character_in_utf8_string_is_malformed() {
+        assert_eq!(
+            decode_utf8_string(&[0x00, 0x01, 0x00]),
+            Err(DecodeError::Malformed)
         );
     }
 }
