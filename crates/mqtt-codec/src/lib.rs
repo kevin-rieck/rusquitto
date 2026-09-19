@@ -130,6 +130,21 @@ pub fn decode_packet_type(byte: u8) -> Result<PacketType, DecodeError> {
 }
 
 pub fn decode_utf8_string(input: &[u8]) -> Result<(&str, usize), DecodeError> {
+    let (bytes, end) = decode_binary_data(input)?;
+
+    let value = match std::str::from_utf8(bytes) {
+        Ok(value) => value,
+        Err(_) => return Err(DecodeError::Malformed),
+    };
+
+    if value.contains('\0') {
+        return Err(DecodeError::Malformed);
+    }
+
+    Ok((value, end))
+}
+
+pub fn decode_binary_data(input: &[u8]) -> Result<(&[u8], usize), DecodeError> {
     if input.len() < 2 {
         return Err(DecodeError::Incomplete);
     }
@@ -141,16 +156,7 @@ pub fn decode_utf8_string(input: &[u8]) -> Result<(&str, usize), DecodeError> {
         return Err(DecodeError::Incomplete);
     }
 
-    let value = match std::str::from_utf8(&input[2..end]) {
-        Ok(value) => value,
-        Err(_) => return Err(DecodeError::Malformed),
-    };
-
-    if value.contains('\0') {
-        return Err(DecodeError::Malformed);
-    }
-
-    Ok((value, end))
+    Ok((&input[2..end], end))
 }
 
 #[cfg(test)]
@@ -362,6 +368,14 @@ mod tests {
         assert_eq!(
             decode_utf8_string(&[0x00, 0x01, 0x00]),
             Err(DecodeError::Malformed)
+        );
+    }
+
+    #[test]
+    fn binary_data_is_decoded() {
+        assert_eq!(
+            decode_binary_data(&[0x00, 0x03, 0x00, 0xff, 0x80]),
+            Ok((&[0x00, 0xff, 0x80][..], 5))
         );
     }
 }
