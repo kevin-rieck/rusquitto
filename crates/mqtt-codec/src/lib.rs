@@ -265,4 +265,16 @@ mod tests {
         assert_eq!(decoder.next_frame(), Ok(Some(vec![0xc0, 0x00])));
         assert_eq!(decoder.next_frame(), Ok(None));
     }
+
+    #[test]
+    fn fragmented_body_waits_for_remaining_bytes() {
+        let mut decoder = FrameDecoder::new(1024);
+        decoder.push(&[0x30, 0x03, 0xaa]);
+        assert_eq!(decoder.next_frame(), Ok(None));
+        decoder.push(&[0xbb, 0xcc]);
+        assert_eq!(
+            decoder.next_frame(),
+            Ok(Some(vec![0x30, 0x03, 0xaa, 0xbb, 0xcc]))
+        );
+    }
 }
