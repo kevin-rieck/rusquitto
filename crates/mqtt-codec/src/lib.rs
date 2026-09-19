@@ -129,6 +129,26 @@ pub fn decode_packet_type(byte: u8) -> Result<PacketType, DecodeError> {
     }
 }
 
+pub fn decode_utf8_string(input: &[u8]) -> Result<(&str, usize), DecodeError> {
+    if input.len() < 2 {
+        return Err(DecodeError::Incomplete);
+    }
+
+    let length = usize::from(u16::from_be_bytes([input[0], input[1]]));
+    let end = 2 + length;
+
+    if input.len() < end {
+        return Err(DecodeError::Incomplete);
+    }
+
+    let value = match std::str::from_utf8(&input[2..end]) {
+        Ok(value) => value,
+        Err(_) => return Err(DecodeError::Malformed),
+    };
+
+    Ok((value, end))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -305,5 +325,13 @@ mod tests {
     #[test]
     fn connect_with_non_zero_flags_is_malformed() {
         assert_eq!(decode_packet_type(0x11), Err(DecodeError::Malformed));
+    }
+
+    #[test]
+    fn utf8_string_is_decoded() {
+        assert_eq!(
+            decode_utf8_string(&[0x00, 0x04, b'M', b'Q', b'T', b'T']),
+            Ok(("MQTT", 6))
+        );
     }
 }
