@@ -277,4 +277,11 @@ mod tests {
             Ok(Some(vec![0x30, 0x03, 0xaa, 0xbb, 0xcc]))
         );
     }
+
+    #[test]
+    fn oversized_frame_is_rejected_before_body_arrives() {
+        let mut decoder = FrameDecoder::new(4);
+        decoder.push(&[0x30, 0x03]);
+        assert_eq!(decoder.next_frame(), Err(DecodeError::PacketTooLarge));
+    }
 }
