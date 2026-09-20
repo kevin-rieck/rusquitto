@@ -256,6 +256,12 @@ pub fn decode_connect(input: &[u8]) -> Result<Connect, DecodeError> {
     })
 }
 
+pub fn encode_connack() -> Vec<u8> {
+    vec![
+        0x20, 0x0d, 0x00, 0x00, 0x0a, 0x24, 0x00, 0x25, 0x00, 0x28, 0x01, 0x29, 0x00, 0x2a, 0x00,
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -561,5 +567,38 @@ mod tests {
         ];
 
         assert_eq!(decode_connect(&frame), Err(DecodeError::Malformed));
+    }
+
+    #[test]
+    fn connect_properties_are_unsupported() {
+        let frame = [
+            0x10, 0x12, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3c, 0x02, 0x17,
+            0x01, 0x00, 0x03, b'a', b'b', b'c',
+        ];
+
+        assert_eq!(decode_connect(&frame), Err(DecodeError::Unsupported));
+    }
+
+    #[test]
+    fn truncated_connect_is_incomplete() {
+        let frame = [
+            0x10, 0x10, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3c, 0x00, 0x00,
+            0x03, b'a', b'b', b'c',
+        ];
+
+        for end in 0..frame.len() {
+            assert_eq!(decode_connect(&frame[..end]), Err(DecodeError::Incomplete));
+        }
+    }
+
+    #[test]
+    fn successful_connack_advertises_phase_one_capabilities() {
+        assert_eq!(
+            encode_connack(),
+            vec![
+                0x20, 0x0d, 0x00, 0x00, 0x0a, 0x24, 0x00, 0x25, 0x00, 0x28, 0x01, 0x29, 0x00, 0x2a,
+                0x00,
+            ]
+        );
     }
 }
