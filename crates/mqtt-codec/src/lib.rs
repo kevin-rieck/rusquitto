@@ -756,4 +756,23 @@ mod tests {
             })
         );
     }
+
+    #[test]
+    fn multiple_connect_properties_are_decoded() {
+        let frame = [
+            0x10, 0x17, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3c, 0x07, 0x17,
+            0x00, 0x27, 0x00, 0x00, 0x04, 0x00, 0x00, 0x03, b'a', b'b', b'c',
+        ];
+
+        assert_eq!(
+            decode_connect(&frame),
+            Ok(Connect {
+                client_id: "abc".to_owned(),
+                clean_start: true,
+                keep_alive: 60,
+                request_problem_information: false,
+                maximum_packet_size: 1024,
+            })
+        );
+    }
 }
