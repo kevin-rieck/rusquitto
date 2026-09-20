@@ -3,5 +3,12 @@
 version = 4
 
 [[package]]
+name = "broker-server"
+version = "0.1.0"
+dependencies = [
+ "mqtt-codec",
+]
+
+[[package]]
 name = "mqtt-codec"
 version = "0.1.0"
