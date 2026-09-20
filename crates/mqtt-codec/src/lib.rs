@@ -356,6 +356,10 @@ pub fn encode_connack() -> Vec<u8> {
     ]
 }
 
+pub fn encode_pingresp() -> Vec<u8> {
+    vec![0xd0, 0x00]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -865,5 +869,10 @@ mod tests {
             decode_pingreq(&[0xc0, 0x01, 0x00]),
             Err(DecodeError::Malformed)
         );
+    }
+
+    #[test]
+    fn pingresp_is_encoded() {
+        assert_eq!(encode_pingresp(), vec![0xd0, 0x00]);
     }
 }
