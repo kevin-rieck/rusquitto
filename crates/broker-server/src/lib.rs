@@ -9,27 +9,32 @@ pub enum ConnectionState {
 #[derive(Debug, PartialEq)]
 pub enum ConnectionAction {
     SendConnAck,
+    SendPingResp,
 }
 
 #[derive(Debug, PartialEq)]
 pub enum ProtocolError {
     UnexpectedPacket,
+    ConnectRequired,
 }
 
 pub fn handle_packet(
     state: &mut ConnectionState,
     packet: Packet,
 ) -> Result<ConnectionAction, ProtocolError> {
-    if *state != ConnectionState::AwaitingConnect {
-        return Err(ProtocolError::UnexpectedPacket);
-    }
+    match *state {
+        ConnectionState::AwaitingConnect => match packet {
+            Packet::Connect(_) => {
+                *state = ConnectionState::Connected;
+                Ok(ConnectionAction::SendConnAck)
+            }
+            _ => Err(ProtocolError::ConnectRequired),
+        },
 
-    match packet {
-        Packet::Connect(_) => {
-            *state = ConnectionState::Connected;
-            Ok(ConnectionAction::SendConnAck)
-        }
-        _ => Err(ProtocolError::UnexpectedPacket),
+        ConnectionState::Connected => match packet {
+            Packet::PingReq => Ok(ConnectionAction::SendPingResp),
+            _ => Err(ProtocolError::UnexpectedPacket),
+        },
     }
 }
 
@@ -52,6 +57,28 @@ mod tests {
         assert_eq!(
             handle_packet(&mut state, packet),
             Ok(ConnectionAction::SendConnAck)
+        );
+        assert_eq!(state, ConnectionState::Connected);
+    }
+
+    #[test]
+    fn pingreq_before_connect_is_rejected() {
+        let mut state = ConnectionState::AwaitingConnect;
+        let packet = Packet::PingReq;
+        assert_eq!(
+            handle_packet(&mut state, packet),
+            Err(ProtocolError::ConnectRequired)
+        );
+        assert_eq!(state, ConnectionState::AwaitingConnect);
+    }
+
+    #[test]
+    fn pingreq_when_connected_sends_pingresp() {
+        let mut state = ConnectionState::Connected;
+        let packet = Packet::PingReq;
+        assert_eq!(
+            handle_packet(&mut state, packet),
+            Ok(ConnectionAction::SendPingResp)
         );
         assert_eq!(state, ConnectionState::Connected);
     }
