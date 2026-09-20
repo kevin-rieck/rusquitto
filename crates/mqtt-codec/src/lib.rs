@@ -260,7 +260,7 @@ pub fn decode_connect(input: &[u8]) -> Result<Connect, DecodeError> {
 
     let mut request_problem_information = true;
     let mut request_problem_information_seen = false;
-    let mut maximum_packet_size = MAX_VARIABLE_BYTE_INTEGER;
+    let mut maximum_packet_size = u32::MAX;
     let mut maximum_packet_size_seen = false;
     let mut property_position = 0;
 
@@ -577,7 +577,7 @@ mod tests {
                 clean_start: true,
                 keep_alive: 60,
                 request_problem_information: true,
-                maximum_packet_size: MAX_VARIABLE_BYTE_INTEGER,
+                maximum_packet_size: u32::MAX,
             })
         );
     }
@@ -656,7 +656,7 @@ mod tests {
                 clean_start: true,
                 keep_alive: 60,
                 request_problem_information: false,
-                maximum_packet_size: MAX_VARIABLE_BYTE_INTEGER,
+                maximum_packet_size: u32::MAX,
             })
         );
     }
