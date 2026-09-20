@@ -758,6 +758,46 @@ mod tests {
     }
 
     #[test]
+    fn zero_maximum_packet_size_is_malformed() {
+        let frame = [
+            0x10, 0x15, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3c, 0x05, 0x27,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x03, b'a', b'b', b'c',
+        ];
+
+        assert_eq!(decode_connect(&frame), Err(DecodeError::Malformed));
+    }
+
+    #[test]
+    fn duplicate_maximum_packet_size_is_malformed() {
+        let frame = [
+            0x10, 0x1a, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3c, 0x0a, 0x27,
+            0x00, 0x00, 0x00, 0x01, 0x27, 0x00, 0x00, 0x00, 0x01, 0x00, 0x03, b'a', b'b', b'c',
+        ];
+
+        assert_eq!(decode_connect(&frame), Err(DecodeError::Malformed));
+    }
+
+    #[test]
+    fn invalid_request_problem_information_is_malformed() {
+        let frame = [
+            0x10, 0x12, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3c, 0x02, 0x17,
+            0x02, 0x00, 0x03, b'a', b'b', b'c',
+        ];
+        
+        assert_eq!(decode_connect(&frame), Err(DecodeError::Malformed));
+    }
+
+    #[test]
+    fn truncated_maximum_packet_size_is_malformed() {
+        let frame = [
+            0x10, 0x14, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3c, 0x04, 0x27,
+            0x00, 0x00, 0x01, 0x00, 0x03, b'a', b'b', b'c',
+        ];
+
+        assert_eq!(decode_connect(&frame), Err(DecodeError::Malformed));
+    }
+
+    #[test]
     fn multiple_connect_properties_are_decoded() {
         let frame = [
             0x10, 0x17, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3c, 0x07, 0x17,
