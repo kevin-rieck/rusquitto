@@ -121,11 +121,13 @@ impl FrameDecoder {
 #[derive(Debug, PartialEq)]
 pub enum PacketType {
     Connect,
+    PingReq,
 }
 
 pub fn decode_packet_type(byte: u8) -> Result<PacketType, DecodeError> {
     match byte >> 4 {
         1 if byte & 0b0000_1111 == 0 => Ok(PacketType::Connect),
+        12 if byte & 0b0000_1111 == 0 => Ok(PacketType::PingReq),
         _ => Err(DecodeError::Malformed),
     }
 }
@@ -814,5 +816,15 @@ mod tests {
                 maximum_packet_size: 1024,
             })
         );
+    }
+
+    #[test]
+    fn pingreq_packet_type_is_decoded() {
+        assert_eq!(decode_packet_type(0xc0), Ok(PacketType::PingReq));
+    }
+
+    #[test]
+    fn pingreq_with_non_zero_flags_is_malformed() {
+        assert_eq!(decode_packet_type(0xc1), Err(DecodeError::Malformed));
     }
 }
