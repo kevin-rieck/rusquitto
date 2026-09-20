@@ -169,12 +169,22 @@ pub fn decode_u16(input: &[u8]) -> Result<(u16, usize), DecodeError> {
     Ok((value, 2))
 }
 
+pub fn decode_u32(input: &[u8]) -> Result<(u32, usize), DecodeError> {
+    if input.len() < 4 {
+        return Err(DecodeError::Incomplete);
+    }
+
+    let value = u32::from_be_bytes([input[0], input[1], input[2], input[3]]);
+    Ok((value, 4))
+}
+
 #[derive(Debug, PartialEq)]
 pub struct Connect {
     pub client_id: String,
     pub clean_start: bool,
     pub keep_alive: u16,
     pub request_problem_information: bool,
+    pub maximum_packet_size: u32,
 }
 
 pub fn decode_connect(input: &[u8]) -> Result<Connect, DecodeError> {
@@ -250,6 +260,8 @@ pub fn decode_connect(input: &[u8]) -> Result<Connect, DecodeError> {
 
     let mut request_problem_information = true;
     let mut request_problem_information_seen = false;
+    let mut maximum_packet_size = MAX_VARIABLE_BYTE_INTEGER;
+    let mut maximum_packet_size_seen = false;
     let mut property_position = 0;
 
     while property_position < properties.len() {
@@ -272,15 +284,34 @@ pub fn decode_connect(input: &[u8]) -> Result<Connect, DecodeError> {
                     _ => return Err(DecodeError::Malformed),
                 }
                 request_problem_information_seen = true;
+                property_position += 1;
+            }
+            0x23 => return Err(DecodeError::Malformed),
+            0x27 => {
+                if maximum_packet_size_seen {
+                    return Err(DecodeError::Malformed);
+                }
+                let (packet_size, packet_size_bytes) = decode_u32(&properties[property_position..])
+                    .map_err(|_| DecodeError::Malformed)?;
+                if packet_size == 0 {
+                    return Err(DecodeError::Malformed);
+                }
+                maximum_packet_size = packet_size;
+                property_position += packet_size_bytes;
+                maximum_packet_size_seen = true;
             }
             _ => return Err(DecodeError::Unsupported),
         }
-        property_position += 1;
     }
 
     position = property_end;
 
-    let (client_id, client_id_bytes) = decode_utf8_string(&body[position..])?;
+    let (client_id, client_id_bytes) = match decode_utf8_string(&body[position..]) {
+        Ok(value) => value,
+        Err(DecodeError::Incomplete) => return Err(DecodeError::Malformed),
+        Err(error) => return Err(error),
+    };
+
     position += client_id_bytes;
 
     if position != body.len() {
@@ -292,6 +323,7 @@ pub fn decode_connect(input: &[u8]) -> Result<Connect, DecodeError> {
         clean_start,
         keep_alive,
         request_problem_information,
+        maximum_packet_size,
     })
 }
 
@@ -545,6 +577,7 @@ mod tests {
                 clean_start: true,
                 keep_alive: 60,
                 request_problem_information: true,
+                maximum_packet_size: MAX_VARIABLE_BYTE_INTEGER,
             })
         );
     }
@@ -623,6 +656,7 @@ mod tests {
                 clean_start: true,
                 keep_alive: 60,
                 request_problem_information: false,
+                maximum_packet_size: MAX_VARIABLE_BYTE_INTEGER,
             })
         );
     }
@@ -667,6 +701,59 @@ mod tests {
                 0x20, 0x0d, 0x00, 0x00, 0x0a, 0x24, 0x00, 0x25, 0x00, 0x28, 0x01, 0x29, 0x00, 0x2a,
                 0x00,
             ]
+        );
+    }
+
+    #[test]
+    fn topic_alias_is_malformed_in_connect() {
+        let frame = [
+            0x10, 0x13, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3c, 0x03, 0x23,
+            0x00, 0x01, 0x00, 0x03, b'a', b'b', b'c',
+        ];
+
+        assert_eq!(decode_connect(&frame), Err(DecodeError::Malformed));
+    }
+
+    #[test]
+    fn client_id_exceeding_frame_is_malformed() {
+        let frame = [
+            0x10, 0x10, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3c, 0x00, 0x00,
+            0x04, b'a', b'b', b'c',
+        ];
+
+        assert_eq!(decode_connect(&frame), Err(DecodeError::Malformed));
+    }
+
+    #[test]
+    fn four_byte_integer_is_decoded() {
+        assert_eq!(decode_u32(&[0x00, 0x00, 0x04, 0x00]), Ok((1024, 4)));
+    }
+
+    #[test]
+    fn incomplete_four_byte_integer_is_reported() {
+        assert_eq!(decode_u32(&[]), Err(DecodeError::Incomplete));
+        assert_eq!(
+            decode_u32(&[0x00, 0x00, 0x04]),
+            Err(DecodeError::Incomplete)
+        );
+    }
+
+    #[test]
+    fn maximum_packet_size_is_decoded() {
+        let frame = [
+            0x10, 0x15, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3c, 0x05, 0x27,
+            0x00, 0x00, 0x04, 0x00, 0x00, 0x03, b'a', b'b', b'c',
+        ];
+
+        assert_eq!(
+            decode_connect(&frame),
+            Ok(Connect {
+                client_id: "abc".to_owned(),
+                clean_start: true,
+                keep_alive: 60,
+                request_problem_information: true,
+                maximum_packet_size: 1024,
+            })
         );
     }
 }
