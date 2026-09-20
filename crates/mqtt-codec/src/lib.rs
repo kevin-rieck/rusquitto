@@ -783,7 +783,7 @@ mod tests {
             0x10, 0x12, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3c, 0x02, 0x17,
             0x02, 0x00, 0x03, b'a', b'b', b'c',
         ];
-        
+
         assert_eq!(decode_connect(&frame), Err(DecodeError::Malformed));
     }
 
