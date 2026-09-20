@@ -5,6 +5,31 @@ pub enum EncodeError {
     OutOfRange,
 }
 
+#[derive(Debug, PartialEq)]
+pub enum Packet {
+    Connect(Connect),
+    PingReq,
+}
+
+pub fn decode_packet(input: &[u8]) -> Result<Packet, DecodeError> {
+    let first_byte = match input.first() {
+        None => return Err(DecodeError::Incomplete),
+        Some(first_byte) => first_byte,
+    };
+
+    let packet_type = decode_packet_type(*first_byte)?;
+    match packet_type {
+        PacketType::Connect => {
+            let connect = decode_connect(input)?;
+            Ok(Packet::Connect(connect))
+        }
+        PacketType::PingReq => {
+            decode_pingreq(input)?;
+            Ok(Packet::PingReq)
+        }
+    }
+}
+
 pub fn encode_variable_byte_integer(value: u32) -> Result<Vec<u8>, EncodeError> {
     if value > MAX_VARIABLE_BYTE_INTEGER {
         return Err(EncodeError::OutOfRange);
@@ -874,5 +899,41 @@ mod tests {
     #[test]
     fn pingresp_is_encoded() {
         assert_eq!(encode_pingresp(), vec![0xd0, 0x00]);
+    }
+
+    #[test]
+    fn pingreq_packet_is_decoded() {
+        assert_eq!(decode_packet(&[0xc0, 0x00]), Ok(Packet::PingReq));
+    }
+
+    #[test]
+    fn malformed_pingreq_packet_is_rejected() {
+        assert_eq!(
+            decode_packet(&[0xc0, 0x01, 0x00]),
+            Err(DecodeError::Malformed)
+        );
+    }
+
+    #[test]
+    fn connect_packet_is_decoded() {
+        let frame = [
+            0x10, 0x10, // CONNECT, Remaining Length 16
+            0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, // MQTT version 5
+            0x02, // Clean Start
+            0x00, 0x3c, // Keep Alive: 60
+            0x00, // No properties
+            0x00, 0x03, b'a', b'b', b'c', // Client ID: "abc"
+        ];
+
+        assert_eq!(
+            decode_packet(&frame),
+            Ok(Packet::Connect(Connect {
+                client_id: "abc".to_owned(),
+                clean_start: true,
+                keep_alive: 60,
+                request_problem_information: true,
+                maximum_packet_size: u32::MAX,
+            }))
+        );
     }
 }
