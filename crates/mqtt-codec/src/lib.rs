@@ -174,6 +174,7 @@ pub struct Connect {
     pub client_id: String,
     pub clean_start: bool,
     pub keep_alive: u16,
+    pub request_problem_information: bool,
 }
 
 pub fn decode_connect(input: &[u8]) -> Result<Connect, DecodeError> {
@@ -238,9 +239,46 @@ pub fn decode_connect(input: &[u8]) -> Result<Connect, DecodeError> {
     let (property_length, property_length_bytes) = decode_variable_byte_integer(&body[position..])?;
     position += property_length_bytes;
 
-    if property_length != 0 {
-        return Err(DecodeError::Unsupported);
+    let property_length =
+        usize::try_from(property_length).map_err(|_| DecodeError::PacketTooLarge)?;
+    let property_end = position
+        .checked_add(property_length)
+        .ok_or(DecodeError::PacketTooLarge)?;
+    let properties = body
+        .get(position..property_end)
+        .ok_or(DecodeError::Malformed)?;
+
+    let mut request_problem_information = true;
+    let mut request_problem_information_seen = false;
+    let mut property_position = 0;
+
+    while property_position < properties.len() {
+        let (identifier, identifier_bytes) =
+            decode_variable_byte_integer(&properties[property_position..])
+                .map_err(|_| DecodeError::Malformed)?;
+        property_position += identifier_bytes;
+
+        match identifier {
+            0x17 => {
+                if request_problem_information_seen {
+                    return Err(DecodeError::Malformed);
+                }
+                let value = properties
+                    .get(property_position)
+                    .ok_or(DecodeError::Malformed)?;
+                match *value {
+                    0 => request_problem_information = false,
+                    1 => request_problem_information = true,
+                    _ => return Err(DecodeError::Malformed),
+                }
+                request_problem_information_seen = true;
+            }
+            _ => return Err(DecodeError::Unsupported),
+        }
+        property_position += 1;
     }
+
+    position = property_end;
 
     let (client_id, client_id_bytes) = decode_utf8_string(&body[position..])?;
     position += client_id_bytes;
@@ -253,6 +291,7 @@ pub fn decode_connect(input: &[u8]) -> Result<Connect, DecodeError> {
         client_id: client_id.to_owned(),
         clean_start,
         keep_alive,
+        request_problem_information,
     })
 }
 
@@ -505,6 +544,7 @@ mod tests {
                 client_id: "abc".to_owned(),
                 clean_start: true,
                 keep_alive: 60,
+                request_problem_information: true,
             })
         );
     }
@@ -570,13 +610,41 @@ mod tests {
     }
 
     #[test]
-    fn connect_properties_are_unsupported() {
+    fn request_problem_information_is_decoded() {
         let frame = [
             0x10, 0x12, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3c, 0x02, 0x17,
-            0x01, 0x00, 0x03, b'a', b'b', b'c',
+            0x00, 0x00, 0x03, b'a', b'b', b'c',
         ];
 
-        assert_eq!(decode_connect(&frame), Err(DecodeError::Unsupported));
+        assert_eq!(
+            decode_connect(&frame),
+            Ok(Connect {
+                client_id: "abc".to_owned(),
+                clean_start: true,
+                keep_alive: 60,
+                request_problem_information: false,
+            })
+        );
+    }
+
+    #[test]
+    fn unterminated_property_identifier_is_malformed() {
+        let frame = [
+            0x10, 0x11, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3c, 0x01, 0x80,
+            0x00, 0x03, b'a', b'b', b'c',
+        ];
+
+        assert_eq!(decode_connect(&frame), Err(DecodeError::Malformed));
+    }
+
+    #[test]
+    fn duplicate_request_problem_information_is_malformed() {
+        let frame = [
+            0x10, 0x14, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3c, 0x04, 0x17,
+            0x00, 0x17, 0x01, 0x00, 0x03, b'a', b'b', b'c',
+        ];
+
+        assert_eq!(decode_connect(&frame), Err(DecodeError::Malformed));
     }
 
     #[test]
