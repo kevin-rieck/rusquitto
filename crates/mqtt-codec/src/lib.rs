@@ -391,9 +391,18 @@ mod tests {
 
     #[test]
     fn values_are_encoded() {
-        assert_eq!(encode_variable_byte_integer(0), Ok(vec![0x00]));
-        assert_eq!(encode_variable_byte_integer(127), Ok(vec![0x7f]));
-        assert_eq!(encode_variable_byte_integer(128), Ok(vec![0x80, 0x01]));
+        assert_eq!(
+            encode_variable_byte_integer(0),
+            Ok(vec![0x00]) // Value 0, continuation bit clear
+        );
+        assert_eq!(
+            encode_variable_byte_integer(127),
+            Ok(vec![0x7f]) // Value 127, continuation bit clear
+        );
+        assert_eq!(
+            encode_variable_byte_integer(128),
+            Ok(vec![0x80, 0x01]) // Digits 0 and 1 in base 128
+        );
         assert_eq!(
             encode_variable_byte_integer(MAX_VARIABLE_BYTE_INTEGER + 1),
             Err(EncodeError::OutOfRange)
@@ -402,10 +411,10 @@ mod tests {
 
     #[test]
     fn has_more_bytes_works() {
-        assert!(!has_more_bytes(0x00));
-        assert!(!has_more_bytes(0x7f));
-        assert!(has_more_bytes(0x80));
-        assert!(has_more_bytes(0xff));
+        assert!(!has_more_bytes(0x00)); // Continuation bit clear
+        assert!(!has_more_bytes(0x7f)); // Continuation bit clear
+        assert!(has_more_bytes(0x80)); // Continuation bit set, value bits clear
+        assert!(has_more_bytes(0xff)); // Continuation and all value bits set
     }
 
     #[test]
@@ -418,24 +427,24 @@ mod tests {
 
     #[test]
     fn one_byte_values_are_decoded() {
-        assert_eq!(decode_variable_byte_integer(&[0x00]), Ok((0, 1)));
-        assert_eq!(decode_variable_byte_integer(&[0x7f]), Ok((127, 1)));
+        assert_eq!(decode_variable_byte_integer(&[0x00]), Ok((0, 1))); // Value 0
+        assert_eq!(decode_variable_byte_integer(&[0x7f]), Ok((127, 1))); // Value 127
     }
 
     #[test]
     fn two_byte_values_are_decoded() {
-        assert_eq!(decode_variable_byte_integer(&[0x80, 0x01]), Ok((128, 2)));
-        assert_eq!(decode_variable_byte_integer(&[0xff, 0x7f]), Ok((16_383, 2)));
+        assert_eq!(decode_variable_byte_integer(&[0x80, 0x01]), Ok((128, 2))); // Digits 0, 1
+        assert_eq!(decode_variable_byte_integer(&[0xff, 0x7f]), Ok((16_383, 2))); // Digits 127, 127
     }
 
     #[test]
     fn input_is_incomplete_or_malformed() {
         assert_eq!(
-            decode_variable_byte_integer(&[0x80]),
+            decode_variable_byte_integer(&[0x80]), // Continuation bit set, next byte missing
             Err(DecodeError::Incomplete)
         );
         assert_eq!(
-            decode_variable_byte_integer(&[0x80; 4]),
+            decode_variable_byte_integer(&[0x80; 4]), // Four continuation bytes, no terminator
             Err(DecodeError::Malformed)
         );
     }
@@ -443,7 +452,7 @@ mod tests {
     #[test]
     fn maximum_value_is_decoded() {
         assert_eq!(
-            decode_variable_byte_integer(&[0xff, 0xff, 0xff, 0x7f]),
+            decode_variable_byte_integer(&[0xff, 0xff, 0xff, 0x7f]), // Four base-128 digits, all 127
             Ok((MAX_VARIABLE_BYTE_INTEGER, 4))
         );
     }
@@ -451,12 +460,12 @@ mod tests {
     #[test]
     fn non_minimal_encoding_is_malformed() {
         assert_eq!(
-            decode_variable_byte_integer(&[0x80, 0x00]),
+            decode_variable_byte_integer(&[0x80, 0x00]), // Value 0 encoded in two bytes
             Err(DecodeError::Malformed)
         );
 
         assert_eq!(
-            decode_variable_byte_integer(&[0xff, 0x00]),
+            decode_variable_byte_integer(&[0xff, 0x00]), // Value 127 encoded in two bytes
             Err(DecodeError::Malformed)
         );
     }
@@ -484,27 +493,28 @@ mod tests {
 
     #[test]
     fn frame_length_is_calculated_from_header() {
-        assert_eq!(decode_frame_length(&[0xc0, 0x00], 1024), Ok(2));
-        assert_eq!(decode_frame_length(&[0x30, 0x03], 1024), Ok(5));
+        assert_eq!(decode_frame_length(&[0xc0, 0x00], 1024), Ok(2)); // PINGREQ, empty body
+        assert_eq!(decode_frame_length(&[0x30, 0x03], 1024), Ok(5)); // PUBLISH, 3-byte body
     }
 
     #[test]
     fn incomplete_frame_header_is_reported() {
         assert_eq!(decode_frame_length(&[], 1024), Err(DecodeError::Incomplete));
         assert_eq!(
-            decode_frame_length(&[0x30], 1024),
+            decode_frame_length(&[0x30], 1024), // PUBLISH header without Remaining Length
             Err(DecodeError::Incomplete)
         );
     }
     #[test]
     fn oversized_frame_is_rejected() {
         assert_eq!(
-            decode_frame_length(&[0x30, 0x03], 4),
+            decode_frame_length(&[0x30, 0x03], 4), // PUBLISH with 3-byte body totals 5 bytes
             Err(DecodeError::PacketTooLarge)
         );
     }
     #[test]
     fn multi_byte_remaining_length_is_included_in_frame_length() {
+        // PUBLISH with Remaining Length 128: 1 fixed-header byte + 2 length bytes + 128 body bytes.
         assert_eq!(decode_frame_length(&[0x30, 0x80, 0x01], 1024), Ok(131));
 
         assert_eq!(
@@ -517,10 +527,10 @@ mod tests {
     fn fragmented_frame_waits_for_remaining_bytes() {
         let mut decoder = FrameDecoder::new(1024);
 
-        decoder.push(&[0xc0]);
+        decoder.push(&[0xc0]); // PINGREQ fixed header
         assert_eq!(decoder.next_frame(), Ok(None));
 
-        decoder.push(&[0x00]);
+        decoder.push(&[0x00]); // Remaining Length: 0
         assert_eq!(decoder.next_frame(), Ok(Some(vec![0xc0, 0x00])));
     }
 
@@ -528,7 +538,10 @@ mod tests {
     fn coalesced_frames_are_decoded_individually() {
         let mut decoder = FrameDecoder::new(1024);
 
-        decoder.push(&[0xc0, 0x00, 0xc0, 0x00]);
+        decoder.push(&[
+            0xc0, 0x00, // First PINGREQ with empty body
+            0xc0, 0x00, // Second PINGREQ with empty body
+        ]);
         assert_eq!(decoder.next_frame(), Ok(Some(vec![0xc0, 0x00])));
         assert_eq!(decoder.next_frame(), Ok(Some(vec![0xc0, 0x00])));
         assert_eq!(decoder.next_frame(), Ok(None));
@@ -537,9 +550,12 @@ mod tests {
     #[test]
     fn fragmented_body_waits_for_remaining_bytes() {
         let mut decoder = FrameDecoder::new(1024);
-        decoder.push(&[0x30, 0x03, 0xaa]);
+        decoder.push(&[
+            0x30, 0x03, // PUBLISH, Remaining Length 3
+            0xaa, // First body byte
+        ]);
         assert_eq!(decoder.next_frame(), Ok(None));
-        decoder.push(&[0xbb, 0xcc]);
+        decoder.push(&[0xbb, 0xcc]); // Remaining body bytes
         assert_eq!(
             decoder.next_frame(),
             Ok(Some(vec![0x30, 0x03, 0xaa, 0xbb, 0xcc]))
@@ -549,34 +565,43 @@ mod tests {
     #[test]
     fn oversized_frame_is_rejected_before_body_arrives() {
         let mut decoder = FrameDecoder::new(4);
-        decoder.push(&[0x30, 0x03]);
+        decoder.push(&[0x30, 0x03]); // PUBLISH with 3-byte body totals 5 bytes
         assert_eq!(decoder.next_frame(), Err(DecodeError::PacketTooLarge));
     }
 
     #[test]
     fn connect_packet_type_is_decoded() {
-        assert_eq!(decode_packet_type(0x10), Ok(PacketType::Connect));
+        assert_eq!(decode_packet_type(0x10), Ok(PacketType::Connect)); // CONNECT, flags 0
     }
 
     #[test]
     fn connect_with_non_zero_flags_is_malformed() {
-        assert_eq!(decode_packet_type(0x11), Err(DecodeError::Malformed));
+        assert_eq!(decode_packet_type(0x11), Err(DecodeError::Malformed)); // CONNECT, reserved flag set
     }
 
     #[test]
     fn utf8_string_is_decoded() {
         assert_eq!(
-            decode_utf8_string(&[0x00, 0x04, b'M', b'Q', b'T', b'T']),
+            decode_utf8_string(&[
+                0x00, 0x04, // String length: 4
+                b'M', b'Q', b'T', b'T', // UTF-8 string: "MQTT"
+            ]),
             Ok(("MQTT", 6))
         );
     }
 
     #[test]
     fn incomplete_utf8_string_is_reported() {
-        assert_eq!(decode_utf8_string(&[0x00]), Err(DecodeError::Incomplete));
+        assert_eq!(
+            decode_utf8_string(&[0x00]), // First byte of the two-byte length prefix
+            Err(DecodeError::Incomplete)
+        );
 
         assert_eq!(
-            decode_utf8_string(&[0x00, 0x04, b'M', b'Q']),
+            decode_utf8_string(&[
+                0x00, 0x04, // String length: 4
+                b'M', b'Q', // Only 2 of 4 string bytes
+            ]),
             Err(DecodeError::Incomplete)
         );
     }
@@ -584,7 +609,10 @@ mod tests {
     #[test]
     fn invalid_utf8_string_is_malformed() {
         assert_eq!(
-            decode_utf8_string(&[0x00, 0x02, 0xc3, 0x28]),
+            decode_utf8_string(&[
+                0x00, 0x02, // String length: 2
+                0xc3, 0x28, // Invalid UTF-8 sequence
+            ]),
             Err(DecodeError::Malformed)
         );
     }
@@ -592,7 +620,10 @@ mod tests {
     #[test]
     fn null_character_in_utf8_string_is_malformed() {
         assert_eq!(
-            decode_utf8_string(&[0x00, 0x01, 0x00]),
+            decode_utf8_string(&[
+                0x00, 0x01, // String length: 1
+                0x00, // Forbidden null character
+            ]),
             Err(DecodeError::Malformed)
         );
     }
@@ -600,26 +631,34 @@ mod tests {
     #[test]
     fn binary_data_is_decoded() {
         assert_eq!(
-            decode_binary_data(&[0x00, 0x03, 0x00, 0xff, 0x80]),
+            decode_binary_data(&[
+                0x00, 0x03, // Binary data length: 3
+                0x00, 0xff, 0x80, // Binary data
+            ]),
             Ok((&[0x00, 0xff, 0x80][..], 5))
         );
     }
+
     #[test]
     fn two_byte_integer_is_decoded() {
-        assert_eq!(decode_u16(&[0x00, 0x3c]), Ok((60, 2)));
+        assert_eq!(decode_u16(&[0x00, 0x3c]), Ok((60, 2))); // Big-endian value 60
     }
 
     #[test]
     fn incomplete_two_byte_integer_is_reported() {
-        assert_eq!(decode_u16(&[]), Err(DecodeError::Incomplete));
-        assert_eq!(decode_u16(&[0x00]), Err(DecodeError::Incomplete));
+        assert_eq!(decode_u16(&[]), Err(DecodeError::Incomplete)); // No bytes
+        assert_eq!(decode_u16(&[0x00]), Err(DecodeError::Incomplete)); // Only the high byte
     }
 
     #[test]
     fn minimal_connect_packet_is_decoded() {
         let frame = [
-            0x10, 0x10, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3c, 0x00, 0x00,
-            0x03, b'a', b'b', b'c',
+            0x10, 0x10, // CONNECT, Remaining Length 16
+            0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, // MQTT version 5
+            0x02, // Clean Start
+            0x00, 0x3c, // Keep Alive: 60
+            0x00, // No properties
+            0x00, 0x03, b'a', b'b', b'c', // Client ID: "abc"
         ];
 
         assert_eq!(
@@ -637,8 +676,12 @@ mod tests {
     #[test]
     fn connect_reserved_flag_is_malformed() {
         let frame = [
-            0x10, 0x10, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x03, 0x00, 0x3c, 0x00, 0x00,
-            0x03, b'a', b'b', b'c',
+            0x10, 0x10, // CONNECT, Remaining Length 16
+            0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, // MQTT version 5
+            0x03, // Clean Start plus reserved bit set
+            0x00, 0x3c, // Keep Alive: 60
+            0x00, // No properties
+            0x00, 0x03, b'a', b'b', b'c', // Client ID: "abc"
         ];
 
         assert_eq!(decode_connect(&frame), Err(DecodeError::Malformed));
@@ -647,8 +690,12 @@ mod tests {
     #[test]
     fn connect_with_will_is_unsupported() {
         let frame = [
-            0x10, 0x10, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x06, 0x00, 0x3c, 0x00, 0x00,
-            0x03, b'a', b'b', b'c',
+            0x10, 0x10, // CONNECT, Remaining Length 16
+            0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, // MQTT version 5
+            0x06, // Clean Start and Will Flag
+            0x00, 0x3c, // Keep Alive: 60
+            0x00, // No properties
+            0x00, 0x03, b'a', b'b', b'c', // Client ID: "abc"
         ];
 
         assert_eq!(decode_connect(&frame), Err(DecodeError::Unsupported));
@@ -657,8 +704,12 @@ mod tests {
     #[test]
     fn connect_with_username_is_unsupported() {
         let frame = [
-            0x10, 0x10, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x82, 0x00, 0x3c, 0x00, 0x00,
-            0x03, b'a', b'b', b'c',
+            0x10, 0x10, // CONNECT, Remaining Length 16
+            0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, // MQTT version 5
+            0x82, // Username Flag and Clean Start
+            0x00, 0x3c, // Keep Alive: 60
+            0x00, // No properties
+            0x00, 0x03, b'a', b'b', b'c', // Client ID: "abc"
         ];
 
         assert_eq!(decode_connect(&frame), Err(DecodeError::Unsupported));
@@ -667,8 +718,12 @@ mod tests {
     #[test]
     fn connect_with_password_is_unsupported() {
         let frame = [
-            0x10, 0x10, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x42, 0x00, 0x3c, 0x00, 0x00,
-            0x03, b'a', b'b', b'c',
+            0x10, 0x10, // CONNECT, Remaining Length 16
+            0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, // MQTT version 5
+            0x42, // Password Flag and Clean Start
+            0x00, 0x3c, // Keep Alive: 60
+            0x00, // No properties
+            0x00, 0x03, b'a', b'b', b'c', // Client ID: "abc"
         ];
 
         assert_eq!(decode_connect(&frame), Err(DecodeError::Unsupported));
@@ -677,8 +732,12 @@ mod tests {
     #[test]
     fn will_qos_without_will_is_malformed() {
         let frame = [
-            0x10, 0x10, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x0a, 0x00, 0x3c, 0x00, 0x00,
-            0x03, b'a', b'b', b'c',
+            0x10, 0x10, // CONNECT, Remaining Length 16
+            0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, // MQTT version 5
+            0x0a, // Will QoS 1 without Will Flag, plus Clean Start
+            0x00, 0x3c, // Keep Alive: 60
+            0x00, // No properties
+            0x00, 0x03, b'a', b'b', b'c', // Client ID: "abc"
         ];
 
         assert_eq!(decode_connect(&frame), Err(DecodeError::Malformed));
@@ -687,8 +746,12 @@ mod tests {
     #[test]
     fn will_qos_three_is_malformed() {
         let frame = [
-            0x10, 0x10, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x1e, 0x00, 0x3c, 0x00, 0x00,
-            0x03, b'a', b'b', b'c',
+            0x10, 0x10, // CONNECT, Remaining Length 16
+            0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, // MQTT version 5
+            0x1e, // Will Flag, invalid Will QoS 3, and Clean Start
+            0x00, 0x3c, // Keep Alive: 60
+            0x00, // No properties
+            0x00, 0x03, b'a', b'b', b'c', // Client ID: "abc"
         ];
 
         assert_eq!(decode_connect(&frame), Err(DecodeError::Malformed));
@@ -697,8 +760,13 @@ mod tests {
     #[test]
     fn request_problem_information_is_decoded() {
         let frame = [
-            0x10, 0x12, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3c, 0x02, 0x17,
-            0x00, 0x00, 0x03, b'a', b'b', b'c',
+            0x10, 0x12, // CONNECT, Remaining Length 18
+            0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, // MQTT version 5
+            0x02, // Clean Start
+            0x00, 0x3c, // Keep Alive: 60
+            0x02, // Property Length: 2
+            0x17, 0x00, // Request Problem Information: false
+            0x00, 0x03, b'a', b'b', b'c', // Client ID: "abc"
         ];
 
         assert_eq!(
@@ -716,8 +784,13 @@ mod tests {
     #[test]
     fn unterminated_property_identifier_is_malformed() {
         let frame = [
-            0x10, 0x11, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3c, 0x01, 0x80,
-            0x00, 0x03, b'a', b'b', b'c',
+            0x10, 0x11, // CONNECT, Remaining Length 17
+            0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, // MQTT version 5
+            0x02, // Clean Start
+            0x00, 0x3c, // Keep Alive: 60
+            0x01, // Property Length: 1
+            0x80, // Unterminated Variable Byte Integer property identifier
+            0x00, 0x03, b'a', b'b', b'c', // Client ID: "abc"
         ];
 
         assert_eq!(decode_connect(&frame), Err(DecodeError::Malformed));
@@ -726,8 +799,14 @@ mod tests {
     #[test]
     fn duplicate_request_problem_information_is_malformed() {
         let frame = [
-            0x10, 0x14, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3c, 0x04, 0x17,
-            0x00, 0x17, 0x01, 0x00, 0x03, b'a', b'b', b'c',
+            0x10, 0x14, // CONNECT, Remaining Length 20
+            0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, // MQTT version 5
+            0x02, // Clean Start
+            0x00, 0x3c, // Keep Alive: 60
+            0x04, // Property Length: 4
+            0x17, 0x00, // Request Problem Information: false
+            0x17, 0x01, // Duplicate Request Problem Information: true
+            0x00, 0x03, b'a', b'b', b'c', // Client ID: "abc"
         ];
 
         assert_eq!(decode_connect(&frame), Err(DecodeError::Malformed));
@@ -736,8 +815,12 @@ mod tests {
     #[test]
     fn truncated_connect_is_incomplete() {
         let frame = [
-            0x10, 0x10, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3c, 0x00, 0x00,
-            0x03, b'a', b'b', b'c',
+            0x10, 0x10, // CONNECT, Remaining Length 16
+            0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, // MQTT version 5
+            0x02, // Clean Start
+            0x00, 0x3c, // Keep Alive: 60
+            0x00, // No properties
+            0x00, 0x03, b'a', b'b', b'c', // Client ID: "abc"
         ];
 
         for end in 0..frame.len() {
@@ -750,8 +833,15 @@ mod tests {
         assert_eq!(
             encode_connack(),
             vec![
-                0x20, 0x0d, 0x00, 0x00, 0x0a, 0x24, 0x00, 0x25, 0x00, 0x28, 0x01, 0x29, 0x00, 0x2a,
-                0x00,
+                0x20, 0x0d, // CONNACK, Remaining Length 13
+                0x00, // Session Present: false
+                0x00, // Success
+                0x0a, // Property Length: 10
+                0x24, 0x00, // Maximum QoS: 0
+                0x25, 0x00, // Retain Available: false
+                0x28, 0x01, // Wildcard Subscription Available: true
+                0x29, 0x00, // Subscription Identifier Available: false
+                0x2a, 0x00, // Shared Subscription Available: false
             ]
         );
     }
@@ -759,8 +849,13 @@ mod tests {
     #[test]
     fn topic_alias_is_malformed_in_connect() {
         let frame = [
-            0x10, 0x13, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3c, 0x03, 0x23,
-            0x00, 0x01, 0x00, 0x03, b'a', b'b', b'c',
+            0x10, 0x13, // CONNECT, Remaining Length 19
+            0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, // MQTT version 5
+            0x02, // Clean Start
+            0x00, 0x3c, // Keep Alive: 60
+            0x03, // Property Length: 3
+            0x23, 0x00, 0x01, // Topic Alias: 1 (not allowed in CONNECT)
+            0x00, 0x03, b'a', b'b', b'c', // Client ID: "abc"
         ];
 
         assert_eq!(decode_connect(&frame), Err(DecodeError::Malformed));
@@ -769,8 +864,12 @@ mod tests {
     #[test]
     fn client_id_exceeding_frame_is_malformed() {
         let frame = [
-            0x10, 0x10, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3c, 0x00, 0x00,
-            0x04, b'a', b'b', b'c',
+            0x10, 0x10, // CONNECT, Remaining Length 16
+            0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, // MQTT version 5
+            0x02, // Clean Start
+            0x00, 0x3c, // Keep Alive: 60
+            0x00, // No properties
+            0x00, 0x04, b'a', b'b', b'c', // Client ID claims 4 bytes, only 3 follow
         ];
 
         assert_eq!(decode_connect(&frame), Err(DecodeError::Malformed));
@@ -778,14 +877,14 @@ mod tests {
 
     #[test]
     fn four_byte_integer_is_decoded() {
-        assert_eq!(decode_u32(&[0x00, 0x00, 0x04, 0x00]), Ok((1024, 4)));
+        assert_eq!(decode_u32(&[0x00, 0x00, 0x04, 0x00]), Ok((1024, 4))); // Big-endian value 1024
     }
 
     #[test]
     fn incomplete_four_byte_integer_is_reported() {
-        assert_eq!(decode_u32(&[]), Err(DecodeError::Incomplete));
+        assert_eq!(decode_u32(&[]), Err(DecodeError::Incomplete)); // No bytes
         assert_eq!(
-            decode_u32(&[0x00, 0x00, 0x04]),
+            decode_u32(&[0x00, 0x00, 0x04]), // Only 3 of 4 bytes
             Err(DecodeError::Incomplete)
         );
     }
@@ -793,8 +892,13 @@ mod tests {
     #[test]
     fn maximum_packet_size_is_decoded() {
         let frame = [
-            0x10, 0x15, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3c, 0x05, 0x27,
-            0x00, 0x00, 0x04, 0x00, 0x00, 0x03, b'a', b'b', b'c',
+            0x10, 0x15, // CONNECT, Remaining Length 21
+            0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, // MQTT version 5
+            0x02, // Clean Start
+            0x00, 0x3c, // Keep Alive: 60
+            0x05, // Property Length: 5
+            0x27, 0x00, 0x00, 0x04, 0x00, // Maximum Packet Size: 1024
+            0x00, 0x03, b'a', b'b', b'c', // Client ID: "abc"
         ];
 
         assert_eq!(
@@ -812,8 +916,13 @@ mod tests {
     #[test]
     fn zero_maximum_packet_size_is_malformed() {
         let frame = [
-            0x10, 0x15, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3c, 0x05, 0x27,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x03, b'a', b'b', b'c',
+            0x10, 0x15, // CONNECT, Remaining Length 21
+            0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, // MQTT version 5
+            0x02, // Clean Start
+            0x00, 0x3c, // Keep Alive: 60
+            0x05, // Property Length: 5
+            0x27, 0x00, 0x00, 0x00, 0x00, // Maximum Packet Size: 0 (invalid)
+            0x00, 0x03, b'a', b'b', b'c', // Client ID: "abc"
         ];
 
         assert_eq!(decode_connect(&frame), Err(DecodeError::Malformed));
@@ -822,8 +931,14 @@ mod tests {
     #[test]
     fn duplicate_maximum_packet_size_is_malformed() {
         let frame = [
-            0x10, 0x1a, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3c, 0x0a, 0x27,
-            0x00, 0x00, 0x00, 0x01, 0x27, 0x00, 0x00, 0x00, 0x01, 0x00, 0x03, b'a', b'b', b'c',
+            0x10, 0x1a, // CONNECT, Remaining Length 26
+            0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, // MQTT version 5
+            0x02, // Clean Start
+            0x00, 0x3c, // Keep Alive: 60
+            0x0a, // Property Length: 10
+            0x27, 0x00, 0x00, 0x00, 0x01, // Maximum Packet Size: 1
+            0x27, 0x00, 0x00, 0x00, 0x01, // Duplicate Maximum Packet Size: 1
+            0x00, 0x03, b'a', b'b', b'c', // Client ID: "abc"
         ];
 
         assert_eq!(decode_connect(&frame), Err(DecodeError::Malformed));
@@ -832,8 +947,13 @@ mod tests {
     #[test]
     fn invalid_request_problem_information_is_malformed() {
         let frame = [
-            0x10, 0x12, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3c, 0x02, 0x17,
-            0x02, 0x00, 0x03, b'a', b'b', b'c',
+            0x10, 0x12, // CONNECT, Remaining Length 18
+            0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, // MQTT version 5
+            0x02, // Clean Start
+            0x00, 0x3c, // Keep Alive: 60
+            0x02, // Property Length: 2
+            0x17, 0x02, // Request Problem Information: 2 (invalid)
+            0x00, 0x03, b'a', b'b', b'c', // Client ID: "abc"
         ];
 
         assert_eq!(decode_connect(&frame), Err(DecodeError::Malformed));
@@ -842,8 +962,13 @@ mod tests {
     #[test]
     fn truncated_maximum_packet_size_is_malformed() {
         let frame = [
-            0x10, 0x14, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3c, 0x04, 0x27,
-            0x00, 0x00, 0x01, 0x00, 0x03, b'a', b'b', b'c',
+            0x10, 0x14, // CONNECT, Remaining Length 20
+            0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, // MQTT version 5
+            0x02, // Clean Start
+            0x00, 0x3c, // Keep Alive: 60
+            0x04, // Property Length: 4
+            0x27, 0x00, 0x00, 0x01, // Truncated Maximum Packet Size value
+            0x00, 0x03, b'a', b'b', b'c', // Client ID: "abc"
         ];
 
         assert_eq!(decode_connect(&frame), Err(DecodeError::Malformed));
@@ -852,8 +977,14 @@ mod tests {
     #[test]
     fn multiple_connect_properties_are_decoded() {
         let frame = [
-            0x10, 0x17, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3c, 0x07, 0x17,
-            0x00, 0x27, 0x00, 0x00, 0x04, 0x00, 0x00, 0x03, b'a', b'b', b'c',
+            0x10, 0x17, // CONNECT, Remaining Length 23
+            0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, // MQTT version 5
+            0x02, // Clean Start
+            0x00, 0x3c, // Keep Alive: 60
+            0x07, // Property Length: 7
+            0x17, 0x00, // Request Problem Information: false
+            0x27, 0x00, 0x00, 0x04, 0x00, // Maximum Packet Size: 1024
+            0x00, 0x03, b'a', b'b', b'c', // Client ID: "abc"
         ];
 
         assert_eq!(
@@ -870,46 +1001,52 @@ mod tests {
 
     #[test]
     fn pingreq_packet_type_is_decoded() {
-        assert_eq!(decode_packet_type(0xc0), Ok(PacketType::PingReq));
+        assert_eq!(decode_packet_type(0xc0), Ok(PacketType::PingReq)); // PINGREQ, flags 0
     }
 
     #[test]
     fn pingreq_with_non_zero_flags_is_malformed() {
-        assert_eq!(decode_packet_type(0xc1), Err(DecodeError::Malformed));
+        assert_eq!(decode_packet_type(0xc1), Err(DecodeError::Malformed)); // PINGREQ, reserved flag set
     }
 
     #[test]
     fn pingreq_is_decoded() {
-        assert_eq!(decode_pingreq(&[0xc0, 0x00]), Ok(()));
+        assert_eq!(decode_pingreq(&[0xc0, 0x00]), Ok(())); // PINGREQ, empty body
     }
 
     #[test]
     fn truncated_pingreq_is_incomplete() {
-        assert_eq!(decode_pingreq(&[0xc0]), Err(DecodeError::Incomplete));
+        assert_eq!(decode_pingreq(&[0xc0]), Err(DecodeError::Incomplete)); // PINGREQ without Remaining Length
     }
 
     #[test]
     fn pingreq_with_non_zero_remaining_length_is_malformed() {
         assert_eq!(
-            decode_pingreq(&[0xc0, 0x01, 0x00]),
+            decode_pingreq(&[
+                0xc0, 0x01, // PINGREQ, Remaining Length 1 (must be 0)
+                0x00, // Unexpected body byte
+            ]),
             Err(DecodeError::Malformed)
         );
     }
 
     #[test]
     fn pingresp_is_encoded() {
-        assert_eq!(encode_pingresp(), vec![0xd0, 0x00]);
+        assert_eq!(encode_pingresp(), vec![0xd0, 0x00]); // PINGRESP, empty body
     }
 
     #[test]
     fn pingreq_packet_is_decoded() {
-        assert_eq!(decode_packet(&[0xc0, 0x00]), Ok(Packet::PingReq));
+        assert_eq!(decode_packet(&[0xc0, 0x00]), Ok(Packet::PingReq)); // PINGREQ, empty body
     }
 
     #[test]
     fn malformed_pingreq_packet_is_rejected() {
         assert_eq!(
-            decode_packet(&[0xc0, 0x01, 0x00]),
+            decode_packet(&[
+                0xc0, 0x01, // PINGREQ, Remaining Length 1 (must be 0)
+                0x00, // Unexpected body byte
+            ]),
             Err(DecodeError::Malformed)
         );
     }
