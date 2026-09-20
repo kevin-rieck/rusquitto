@@ -14,8 +14,8 @@ pub enum ConnectionAction {
 
 #[derive(Debug, PartialEq)]
 pub enum ProtocolError {
-    UnexpectedPacket,
     ConnectRequired,
+    DuplicateConnect,
 }
 
 pub fn handle_packet(
@@ -33,7 +33,7 @@ pub fn handle_packet(
 
         ConnectionState::Connected => match packet {
             Packet::PingReq => Ok(ConnectionAction::SendPingResp),
-            _ => Err(ProtocolError::UnexpectedPacket),
+            Packet::Connect(_) => Err(ProtocolError::DuplicateConnect),
         },
     }
 }
@@ -43,16 +43,20 @@ mod tests {
     use super::*;
     use mqtt_codec::{Connect, Packet};
 
-    #[test]
-    fn connect_transitions_to_connected() {
-        let mut state = ConnectionState::AwaitingConnect;
-        let packet = Packet::Connect(Connect {
+    fn connect_packet() -> Packet {
+        Packet::Connect(Connect {
             client_id: "abc".to_owned(),
             clean_start: true,
             keep_alive: 60,
             request_problem_information: true,
             maximum_packet_size: u32::MAX,
-        });
+        })
+    }
+
+    #[test]
+    fn connect_transitions_to_connected() {
+        let mut state = ConnectionState::AwaitingConnect;
+        let packet = connect_packet();
 
         assert_eq!(
             handle_packet(&mut state, packet),
@@ -79,6 +83,17 @@ mod tests {
         assert_eq!(
             handle_packet(&mut state, packet),
             Ok(ConnectionAction::SendPingResp)
+        );
+        assert_eq!(state, ConnectionState::Connected);
+    }
+
+    #[test]
+    fn duplicate_connect_is_rejected() {
+        let mut state = ConnectionState::Connected;
+        let packet = connect_packet();
+        assert_eq!(
+            handle_packet(&mut state, packet),
+            Err(ProtocolError::DuplicateConnect)
         );
         assert_eq!(state, ConnectionState::Connected);
     }
