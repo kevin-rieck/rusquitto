@@ -329,6 +329,27 @@ pub fn decode_connect(input: &[u8]) -> Result<Connect, DecodeError> {
     })
 }
 
+pub fn decode_pingreq(input: &[u8]) -> Result<(), DecodeError> {
+    let frame_length = decode_frame_length(input, usize::MAX)?;
+    if frame_length != 2 {
+        return Err(DecodeError::Malformed);
+    }
+
+    if input.len() < frame_length {
+        return Err(DecodeError::Incomplete);
+    }
+
+    if input.len() > frame_length {
+        return Err(DecodeError::Malformed);
+    }
+
+    let packet_type = decode_packet_type(input[0])?;
+    if packet_type != PacketType::PingReq {
+        return Err(DecodeError::Malformed);
+    }
+    Ok(())
+}
+
 pub fn encode_connack() -> Vec<u8> {
     vec![
         0x20, 0x0d, 0x00, 0x00, 0x0a, 0x24, 0x00, 0x25, 0x00, 0x28, 0x01, 0x29, 0x00, 0x2a, 0x00,
@@ -826,5 +847,23 @@ mod tests {
     #[test]
     fn pingreq_with_non_zero_flags_is_malformed() {
         assert_eq!(decode_packet_type(0xc1), Err(DecodeError::Malformed));
+    }
+
+    #[test]
+    fn pingreq_is_decoded() {
+        assert_eq!(decode_pingreq(&[0xc0, 0x00]), Ok(()));
+    }
+
+    #[test]
+    fn truncated_pingreq_is_incomplete() {
+        assert_eq!(decode_pingreq(&[0xc0]), Err(DecodeError::Incomplete));
+    }
+
+    #[test]
+    fn pingreq_with_non_zero_remaining_length_is_malformed() {
+        assert_eq!(
+            decode_pingreq(&[0xc0, 0x01, 0x00]),
+            Err(DecodeError::Malformed)
+        );
     }
 }
