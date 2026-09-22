@@ -1,4 +1,4 @@
-use mqtt_codec::Packet;
+use mqtt_codec::{DecodeError, Packet, decode_packet, encode_connack, encode_pingresp};
 
 #[derive(Debug, PartialEq)]
 pub enum ConnectionState {
@@ -18,6 +18,12 @@ pub enum ProtocolError {
     DuplicateConnect,
 }
 
+#[derive(Debug, PartialEq)]
+pub enum AdapterError {
+    Decode(DecodeError),
+    Protocol(ProtocolError),
+}
+
 pub fn handle_packet(
     state: &mut ConnectionState,
     packet: Packet,
@@ -35,6 +41,16 @@ pub fn handle_packet(
             Packet::PingReq => Ok(ConnectionAction::SendPingResp),
             Packet::Connect(_) => Err(ProtocolError::DuplicateConnect),
         },
+    }
+}
+
+pub fn process_frame(state: &mut ConnectionState, input: &[u8]) -> Result<Vec<u8>, AdapterError> {
+    let packet = decode_packet(input).map_err(AdapterError::Decode)?;
+
+    let connection_action = handle_packet(state, packet).map_err(AdapterError::Protocol)?;
+    match connection_action {
+        ConnectionAction::SendConnAck => Ok(encode_connack()),
+        ConnectionAction::SendPingResp => Ok(encode_pingresp()),
     }
 }
 
@@ -96,5 +112,38 @@ mod tests {
             Err(ProtocolError::DuplicateConnect)
         );
         assert_eq!(state, ConnectionState::Connected);
+    }
+
+    #[test]
+    fn connect_frame_produces_connack_and_transitions_to_connected() {
+        let mut state = ConnectionState::AwaitingConnect;
+        let frame = [
+            0x10, 0x10, // CONNECT, Remaining Length 16
+            0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, // Clean Start
+            0x00, 0x3c, // Keep Alive: 60
+            0x00, // No properties
+            0x00, 0x03, b'a', b'b', b'c',
+        ];
+
+        let response = process_frame(&mut state, &frame).unwrap();
+
+        assert_eq!(
+            response,
+            vec![
+                0x20, 0x0d, 0x00, 0x00, 0x0a, 0x24, 0x00, 0x25, 0x00, 0x28, 0x01, 0x29, 0x00, 0x2a,
+                0x00,
+            ]
+        );
+        assert_eq!(state, ConnectionState::Connected);
+    }
+
+    #[test]
+    fn connected_pingreq_frame_produces_pingresp() {
+        let mut state = ConnectionState::Connected;
+        let frame = [0xc0, 0x00];
+
+        let response = process_frame(&mut state, &frame).unwrap();
+        assert_eq!(state, ConnectionState::Connected);
+        assert_eq!(response, vec![0xd0, 0x00]);
     }
 }
