@@ -8,6 +8,7 @@ pub enum EncodeError {
 #[derive(Debug, PartialEq)]
 pub enum Packet {
     Connect(Connect),
+    Disconnect,
     PingReq,
 }
 
@@ -26,6 +27,10 @@ pub fn decode_packet(input: &[u8]) -> Result<Packet, DecodeError> {
         PacketType::PingReq => {
             decode_pingreq(input)?;
             Ok(Packet::PingReq)
+        }
+        PacketType::Disconnect => {
+            decode_disconnect(input)?;
+            Ok(Packet::Disconnect)
         }
     }
 }
@@ -146,6 +151,7 @@ impl FrameDecoder {
 #[derive(Debug, PartialEq)]
 pub enum PacketType {
     Connect,
+    Disconnect,
     PingReq,
 }
 
@@ -153,6 +159,7 @@ pub fn decode_packet_type(byte: u8) -> Result<PacketType, DecodeError> {
     match byte >> 4 {
         1 if byte & 0b0000_1111 == 0 => Ok(PacketType::Connect),
         12 if byte & 0b0000_1111 == 0 => Ok(PacketType::PingReq),
+        14 if byte & 0b0000_1111 == 0 => Ok(PacketType::Disconnect),
         _ => Err(DecodeError::Malformed),
     }
 }
@@ -370,6 +377,27 @@ pub fn decode_pingreq(input: &[u8]) -> Result<(), DecodeError> {
 
     let packet_type = decode_packet_type(input[0])?;
     if packet_type != PacketType::PingReq {
+        return Err(DecodeError::Malformed);
+    }
+    Ok(())
+}
+
+pub fn decode_disconnect(input: &[u8]) -> Result<(), DecodeError> {
+    let frame_length = decode_frame_length(input, usize::MAX)?;
+    if input.len() < frame_length {
+        return Err(DecodeError::Incomplete);
+    }
+
+    if input.len() > frame_length {
+        return Err(DecodeError::Malformed);
+    }
+
+    if frame_length != 2 {
+        return Err(DecodeError::Malformed);
+    }
+
+    let packet_type = decode_packet_type(input[0])?;
+    if packet_type != PacketType::Disconnect {
         return Err(DecodeError::Malformed);
     }
     Ok(())
@@ -1071,6 +1099,27 @@ mod tests {
                 request_problem_information: true,
                 maximum_packet_size: u32::MAX,
             }))
+        );
+    }
+
+    #[test]
+    fn disconnect_packet_is_decoded() {
+        assert_eq!(decode_packet(&[0xe0, 0x00]), Ok(Packet::Disconnect));
+    }
+
+    #[test]
+    fn disconnect_packet_with_trailing_bytes_is_malformed() {
+        assert_eq!(
+            decode_packet(&[0xe0, 0x00, 0x00]),
+            Err(DecodeError::Malformed)
+        );
+    }
+
+    #[test]
+    fn disconnect_decoder_rejects_another_packet_type() {
+        assert_eq!(
+            decode_disconnect(&[0xc0, 0x00]),
+            Err(DecodeError::Malformed)
         );
     }
 }

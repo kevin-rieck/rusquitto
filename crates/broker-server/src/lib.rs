@@ -4,18 +4,21 @@ use mqtt_codec::{DecodeError, Packet, decode_packet, encode_connack, encode_ping
 pub enum ConnectionState {
     AwaitingConnect,
     Connected,
+    Closing,
 }
 
 #[derive(Debug, PartialEq)]
 pub enum ConnectionAction {
     SendConnAck,
     SendPingResp,
+    Close,
 }
 
 #[derive(Debug, PartialEq)]
 pub enum ProtocolError {
     ConnectRequired,
     DuplicateConnect,
+    ConnectionClosing,
 }
 
 #[derive(Debug, PartialEq)]
@@ -40,7 +43,13 @@ pub fn handle_packet(
         ConnectionState::Connected => match packet {
             Packet::PingReq => Ok(ConnectionAction::SendPingResp),
             Packet::Connect(_) => Err(ProtocolError::DuplicateConnect),
+            Packet::Disconnect => {
+                *state = ConnectionState::Closing;
+                Ok(ConnectionAction::Close)
+            }
         },
+
+        ConnectionState::Closing => Err(ProtocolError::ConnectionClosing),
     }
 }
 
@@ -51,6 +60,7 @@ pub fn process_frame(state: &mut ConnectionState, input: &[u8]) -> Result<Vec<u8
     match connection_action {
         ConnectionAction::SendConnAck => Ok(encode_connack()),
         ConnectionAction::SendPingResp => Ok(encode_pingresp()),
+        ConnectionAction::Close => Ok(vec![]),
     }
 }
 
@@ -145,5 +155,26 @@ mod tests {
         let response = process_frame(&mut state, &frame).unwrap();
         assert_eq!(state, ConnectionState::Connected);
         assert_eq!(response, vec![0xd0, 0x00]);
+    }
+
+    #[test]
+    fn disconnect_when_connected_transitions_to_closing() {
+        let mut state = ConnectionState::Connected;
+
+        assert_eq!(
+            handle_packet(&mut state, Packet::Disconnect),
+            Ok(ConnectionAction::Close)
+        );
+        assert_eq!(state, ConnectionState::Closing);
+    }
+
+    #[test]
+    fn disconnect_frame_produces_no_response_and_transitions_to_closing() {
+        let mut state = ConnectionState::Connected;
+
+        let response = process_frame(&mut state, &[0xe0, 0x00]).unwrap();
+
+        assert!(response.is_empty());
+        assert_eq!(state, ConnectionState::Closing);
     }
 }
