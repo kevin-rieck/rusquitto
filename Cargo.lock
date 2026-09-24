@@ -3,6 +3,10 @@
 version = 4
 
 [[package]]
+name = "broker-core"
+version = "0.1.0"
+
+[[package]]
 name = "broker-server"
 version = "0.1.0"
 dependencies = [
