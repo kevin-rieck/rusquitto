@@ -53,6 +53,41 @@ impl TryFrom<&str> for TopicFilter {
     }
 }
 
+impl TopicFilter {
+    pub fn matches(&self, name: &TopicName) -> bool {
+        if name.0.starts_with('$') && (self.0.starts_with('+') || self.0.starts_with('#')) {
+            return false;
+        }
+        let mut topic_levels = name.0.split('/');
+        let mut filter_levels = self.0.split('/');
+
+        loop {
+            let next_filter_level = filter_levels.next();
+            let next_topic_level = topic_levels.next();
+
+            match (next_filter_level, next_topic_level) {
+                (Some(filter), Some(topic)) => {
+                    if filter == "#" {
+                        return true;
+                    }
+                    if filter == topic || filter == "+" {
+                        continue;
+                    }
+                    return false;
+                }
+                (Some(filter), None) => {
+                    if filter == "#" {
+                        return true;
+                    }
+                    return false;
+                }
+                (None, Some(_)) => return false,
+                (None, None) => return true,
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,5 +175,76 @@ mod tests {
     fn topic_filter_at_maximum_byte_length_is_accepted() {
         let text = "a".repeat(65_535);
         assert!(TopicFilter::try_from(text.as_str()).is_ok());
+    }
+
+    #[test]
+    fn topic_name_matches_filter() {
+        let text = "sensors/temp";
+        let topic = TopicName::try_from(text).unwrap();
+        let filter = TopicFilter::try_from(text).unwrap();
+        assert!(filter.matches(&topic));
+    }
+
+    #[test]
+    fn topic_matches_plus_wildcard_filter() {
+        let topic = TopicName::try_from("sensors/temp").unwrap();
+        let filter = TopicFilter::try_from("sensors/+").unwrap();
+        assert!(filter.matches(&topic));
+    }
+
+    #[test]
+    fn topic_does_not_plus_wildcard_if_too_many_levels() {
+        let topic = TopicName::try_from("sensors/temp/outside").unwrap();
+        let filter = TopicFilter::try_from("sensors/+").unwrap();
+        assert!(!filter.matches(&topic));
+    }
+
+    #[test]
+    fn topic_matches_hash_wildcard() {
+        let topic = TopicName::try_from("sensors/outside").unwrap();
+        let filter = TopicFilter::try_from("sensors/#").unwrap();
+        assert!(filter.matches(&topic));
+    }
+
+    #[test]
+    fn hash_wildcard_matches_zero_or_more_levels() {
+        let topic = TopicName::try_from("sensors").unwrap();
+        let filter = TopicFilter::try_from("sensors/#").unwrap();
+        assert!(filter.matches(&topic));
+    }
+
+    #[test]
+    fn plus_wildcard_does_not_match_zero_levels() {
+        let topic = TopicName::try_from("sensors").unwrap();
+        let filter = TopicFilter::try_from("sensors/+").unwrap();
+        assert!(!filter.matches(&topic));
+    }
+
+    #[test]
+    fn plus_wildcard_matches_empty_topic_level() {
+        let topic = TopicName::try_from("sensors/").unwrap();
+        let filter = TopicFilter::try_from("sensors/+").unwrap();
+        assert!(filter.matches(&topic));
+    }
+
+    #[test]
+    fn system_topics_not_matched_by_toplevel_wildcard() {
+        let topic = TopicName::try_from("$SYS/uptime").unwrap();
+        let filter = TopicFilter::try_from("#").unwrap();
+        assert!(!filter.matches(&topic));
+    }
+
+    #[test]
+    fn system_topics_matched_by_wildcard_below_toplevel() {
+        let topic = TopicName::try_from("$SYS/uptime").unwrap();
+        let filter = TopicFilter::try_from("$SYS/#").unwrap();
+        assert!(filter.matches(&topic));
+    }
+
+    #[test]
+    fn exact_matches_work() {
+        let topic = TopicName::try_from("sensors/temp").unwrap();
+        let filter = TopicFilter::try_from("sensors/humidity").unwrap();
+        assert!(!filter.matches(&topic));
     }
 }
