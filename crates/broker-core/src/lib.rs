@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 #[derive(Debug, PartialEq)]
 pub struct TopicName(String);
 
@@ -9,6 +11,14 @@ pub struct TopicFilter(String);
 
 #[derive(Debug, PartialEq)]
 pub struct TopicFilterError;
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub struct SessionId(u64);
+
+#[derive(Debug, PartialEq, Default)]
+pub struct TopicIndex {
+    ids: HashMap<String, Vec<SessionId>>,
+}
 
 impl TryFrom<&str> for TopicName {
     type Error = TopicNameError;
@@ -84,6 +94,23 @@ impl TopicFilter {
                 (None, Some(_)) => return false,
                 (None, None) => return true,
             }
+        }
+    }
+}
+
+impl TopicIndex {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn insert(&mut self, session_id: SessionId, filter: TopicFilter) {
+        self.ids.entry(filter.0).or_default().push(session_id);
+    }
+
+    pub fn matching(&self, topic: &TopicName) -> Vec<SessionId> {
+        match self.ids.get(&topic.0) {
+            Some(topics) => topics.clone(),
+            None => vec![],
         }
     }
 }
@@ -246,5 +273,15 @@ mod tests {
         let topic = TopicName::try_from("sensors/temp").unwrap();
         let filter = TopicFilter::try_from("sensors/humidity").unwrap();
         assert!(!filter.matches(&topic));
+    }
+
+    #[test]
+    fn topic_index_returns_correct_session_id() {
+        let topic = TopicName::try_from("sensors/temp").unwrap();
+        let filter = TopicFilter::try_from("sensors/temp").unwrap();
+        let session_id = SessionId(1);
+        let mut index = TopicIndex::new();
+        index.insert(session_id, filter);
+        assert_eq!(index.matching(&topic), vec![session_id]);
     }
 }
