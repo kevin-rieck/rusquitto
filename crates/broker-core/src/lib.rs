@@ -17,7 +17,13 @@ pub struct SessionId(u64);
 
 #[derive(Debug, PartialEq, Default)]
 pub struct TopicIndex {
-    ids: HashMap<String, Vec<SessionId>>,
+    root: Node,
+}
+
+#[derive(Default, Debug, PartialEq)]
+struct Node {
+    children: HashMap<String, Node>,
+    ids: Vec<SessionId>,
 }
 
 impl TryFrom<&str> for TopicName {
@@ -104,14 +110,34 @@ impl TopicIndex {
     }
 
     pub fn insert(&mut self, session_id: SessionId, filter: TopicFilter) {
-        self.ids.entry(filter.0).or_default().push(session_id);
+        let mut node = &mut self.root;
+        for level in filter.0.split('/') {
+            node = node.children.entry(level.to_owned()).or_default();
+        }
+        node.ids.push(session_id);
     }
 
     pub fn matching(&self, topic: &TopicName) -> Vec<SessionId> {
-        match self.ids.get(&topic.0) {
-            Some(topics) => topics.clone(),
-            None => vec![],
+        fn visit(node: &Node, levels: &[&str], at_root: bool, ids: &mut Vec<SessionId>) {
+            let Some((level, rest)) = levels.split_first() else {
+                ids.extend(node.ids.iter().copied());
+                return;
+            };
+
+            if let Some(child) = node.children.get(*level) {
+                visit(child, rest, false, ids);
+            }
+            if (!at_root || !level.starts_with('$'))
+                && let Some(child) = node.children.get("+")
+            {
+                visit(child, rest, false, ids);
+            }
         }
+
+        let levels: Vec<_> = topic.0.split('/').collect();
+        let mut ids = Vec::new();
+        visit(&self.root, &levels, true, &mut ids);
+        ids
     }
 }
 
@@ -283,5 +309,25 @@ mod tests {
         let mut index = TopicIndex::new();
         index.insert(session_id, filter);
         assert_eq!(index.matching(&topic), vec![session_id]);
+    }
+
+    #[test]
+    fn matching_topic_returns_session_id() {
+        let id = SessionId(1);
+        let filter = TopicFilter::try_from("sensors/+").unwrap();
+        let topic = TopicName::try_from("sensors/temp").unwrap();
+        let mut index = TopicIndex::new();
+        index.insert(id, filter);
+        assert_eq!(index.matching(&topic), vec![id]);
+    }
+
+    #[test]
+    fn matching_hash_wildcard_returns_id() {
+        let id = SessionId(1);
+        let filter = TopicFilter::try_from("sensors/#").unwrap();
+        let topic = TopicName::try_from("sensors").unwrap();
+        let mut index = TopicIndex::new();
+        index.insert(id, filter);
+        assert_eq!(index.matching(&topic), vec![id]);
     }
 }
