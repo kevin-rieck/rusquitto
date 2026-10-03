@@ -148,16 +148,26 @@ impl TopicIndex {
     }
 
     pub fn remove(&mut self, session_id: SessionId, filter: &TopicFilter) {
-        let mut node = &mut self.root;
-        for level in filter.0.split('/') {
-            match node.children.get_mut(level) {
-                Some(child) => {
-                    node = child;
+        fn prune(node: &mut Node, remaining_levels: &[&str], session_id: SessionId) -> bool {
+            match remaining_levels.split_first() {
+                None => {
+                    node.ids.retain(|id| *id != session_id);
+                    node.ids.is_empty() && node.children.is_empty()
                 }
-                None => return,
+                Some((level, rest)) => match node.children.get_mut(*level) {
+                    Some(child) => {
+                        let needs_pruning = prune(child, rest, session_id);
+                        if needs_pruning {
+                            node.children.remove(*level);
+                        }
+                        node.ids.is_empty() && node.children.is_empty()
+                    }
+                    None => false,
+                },
             }
         }
-        node.ids.retain(|id| *id != session_id);
+        let levels: Vec<_> = filter.0.split('/').collect();
+        prune(&mut self.root, &levels, session_id);
     }
 }
 
@@ -363,5 +373,14 @@ mod tests {
             index.matching(&TopicName::try_from(topic).unwrap()),
             vec![SessionId(2)]
         )
+    }
+
+    #[test]
+    fn empty_index_paths_reclaimed_after_removal() {
+        let filter = "sensors/temp";
+        let mut index = TopicIndex::new();
+        index.insert(SessionId(1), TopicFilter::try_from(filter).unwrap());
+        index.remove(SessionId(1), &TopicFilter::try_from(filter).unwrap());
+        assert!(index.root.children.is_empty());
     }
 }
