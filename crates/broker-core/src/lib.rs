@@ -119,6 +119,12 @@ impl TopicIndex {
 
     pub fn matching(&self, topic: &TopicName) -> Vec<SessionId> {
         fn visit(node: &Node, levels: &[&str], at_root: bool, ids: &mut Vec<SessionId>) {
+            if (!at_root || !levels.first().is_some_and(|level| level.starts_with('$')))
+                && let Some(child) = node.children.get("#")
+            {
+                ids.extend(child.ids.iter().copied());
+            }
+
             let Some((level, rest)) = levels.split_first() else {
                 ids.extend(node.ids.iter().copied());
                 return;
@@ -127,6 +133,7 @@ impl TopicIndex {
             if let Some(child) = node.children.get(*level) {
                 visit(child, rest, false, ids);
             }
+
             if (!at_root || !level.starts_with('$'))
                 && let Some(child) = node.children.get("+")
             {
@@ -138,6 +145,19 @@ impl TopicIndex {
         let mut ids = Vec::new();
         visit(&self.root, &levels, true, &mut ids);
         ids
+    }
+
+    pub fn remove(&mut self, session_id: SessionId, filter: &TopicFilter) {
+        let mut node = &mut self.root;
+        for level in filter.0.split('/') {
+            match node.children.get_mut(level) {
+                Some(child) => {
+                    node = child;
+                }
+                None => return,
+            }
+        }
+        node.ids.retain(|id| *id != session_id);
     }
 }
 
@@ -329,5 +349,19 @@ mod tests {
         let mut index = TopicIndex::new();
         index.insert(id, filter);
         assert_eq!(index.matching(&topic), vec![id]);
+    }
+
+    #[test]
+    fn session_id_not_returned_after_removal() {
+        let topic = "sensors/temp";
+        let filter = "sensors/temp";
+        let mut index = TopicIndex::new();
+        index.insert(SessionId(1), TopicFilter::try_from(filter).unwrap());
+        index.insert(SessionId(2), TopicFilter::try_from(filter).unwrap());
+        index.remove(SessionId(1), &TopicFilter::try_from(filter).unwrap());
+        assert_eq!(
+            index.matching(&TopicName::try_from(topic).unwrap()),
+            vec![SessionId(2)]
+        )
     }
 }
