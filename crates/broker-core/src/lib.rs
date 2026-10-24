@@ -114,7 +114,9 @@ impl TopicIndex {
         for level in filter.0.split('/') {
             node = node.children.entry(level.to_owned()).or_default();
         }
-        node.ids.push(session_id);
+        if !node.ids.contains(&session_id) {
+            node.ids.push(session_id);
+        }
     }
 
     pub fn matching(&self, topic: &TopicName) -> Vec<SessionId> {
@@ -488,6 +490,17 @@ mod tests {
             SessionId(1),
             &TopicFilter::try_from("sensors/humidity").unwrap(),
         );
+        assert_eq!(
+            index.matching(&TopicName::try_from("sensors/temp").unwrap()),
+            vec![SessionId(1)]
+        );
+    }
+
+    #[test]
+    fn inserting_same_subscription_twice_returns_id_once() {
+        let mut index = TopicIndex::new();
+        index.insert(SessionId(1), TopicFilter::try_from("sensors/temp").unwrap());
+        index.insert(SessionId(1), TopicFilter::try_from("sensors/temp").unwrap());
         assert_eq!(
             index.matching(&TopicName::try_from("sensors/temp").unwrap()),
             vec![SessionId(1)]
