@@ -475,4 +475,16 @@ mod tests {
         assert!(matches.contains(&SessionId(2)));
         assert!(matches.contains(&SessionId(3)));
     }
+
+    #[test]
+    fn removing_nonexistent_subscriptions_preserves_existing_one() {
+        let mut index = TopicIndex::new();
+        index.insert(SessionId(1), TopicFilter::try_from("sensors/+").unwrap());
+        index.remove(SessionId(2), &TopicFilter::try_from("sensors/+").unwrap());
+        index.remove(SessionId(1), &TopicFilter::try_from("sensors/humidity").unwrap());
+        assert_eq!(
+            index.matching(&TopicName::try_from("sensors/temp").unwrap()),
+            vec![SessionId(1)]
+        );
+    }
 }
