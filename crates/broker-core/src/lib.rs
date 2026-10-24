@@ -506,4 +506,23 @@ mod tests {
             vec![SessionId(1)]
         );
     }
+
+    #[test]
+    fn inserting_after_removal_returns_id() {
+        let mut index = TopicIndex::new();
+        index.insert(SessionId(1), TopicFilter::try_from("sensors/temp").unwrap());
+        index.remove(
+            SessionId(1),
+            &TopicFilter::try_from("sensors/temp").unwrap(),
+        );
+        assert_eq!(
+            index.matching(&TopicName::try_from("sensors/temp").unwrap()),
+            vec![]
+        );
+        index.insert(SessionId(1), TopicFilter::try_from("sensors/temp").unwrap());
+        assert_eq!(
+            index.matching(&TopicName::try_from("sensors/temp").unwrap()),
+            vec![SessionId(1)]
+        );
+    }
 }
