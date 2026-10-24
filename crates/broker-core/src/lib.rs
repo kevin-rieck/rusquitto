@@ -441,24 +441,27 @@ mod tests {
 
     #[test]
     fn filter_matches_agrees_with_index_matching() {
-        let cases = [
-            ("sensors/+", "sensors/"),
-            ("sensors/#", "sensors"),
-            ("+", "$SYS"),
-            ("$SYS/#", "$SYS/uptime"),
-            ("sensors/+", "sensors/temp/outside"),
+        let filters = ["#", "+", "sensors/+", "sensors/#", "$SYS/#"];
+        let topics = [
+            "sensors",
+            "sensors/temp",
+            "sensors/",
+            "$SYS/uptime",
+            "sensors/temp/outside",
         ];
 
-        for (filter_text, topic_text) in cases {
-            let mut index = TopicIndex::new();
-            let filter = TopicFilter::try_from(filter_text).unwrap();
-            let topic = TopicName::try_from(topic_text).unwrap();
-            let filter_matches = filter.matches(&topic);
-            index.insert(SessionId(1), filter);
-            assert_eq!(
-                index.matching(&topic).contains(&SessionId(1)),
-                filter_matches
-            );
+        for &filter_text in &filters {
+            for &topic_text in &topics {
+                let mut index = TopicIndex::new();
+                let filter = TopicFilter::try_from(filter_text).unwrap();
+                let topic = TopicName::try_from(topic_text).unwrap();
+                let filter_matches = filter.matches(&topic);
+                index.insert(SessionId(1), filter);
+                assert_eq!(
+                    index.matching(&topic).contains(&SessionId(1)),
+                    filter_matches
+                );
+            }
         }
     }
 
@@ -481,7 +484,10 @@ mod tests {
         let mut index = TopicIndex::new();
         index.insert(SessionId(1), TopicFilter::try_from("sensors/+").unwrap());
         index.remove(SessionId(2), &TopicFilter::try_from("sensors/+").unwrap());
-        index.remove(SessionId(1), &TopicFilter::try_from("sensors/humidity").unwrap());
+        index.remove(
+            SessionId(1),
+            &TopicFilter::try_from("sensors/humidity").unwrap(),
+        );
         assert_eq!(
             index.matching(&TopicName::try_from("sensors/temp").unwrap()),
             vec![SessionId(1)]
