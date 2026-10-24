@@ -438,4 +438,27 @@ mod tests {
             vec![]
         )
     }
+
+    #[test]
+    fn filter_matches_agrees_with_index_matching() {
+        let cases = [
+            ("sensors/+", "sensors/"),
+            ("sensors/#", "sensors"),
+            ("+", "$SYS"),
+            ("$SYS/#", "$SYS/uptime"),
+            ("sensors/+", "sensors/temp/outside"),
+        ];
+
+        for (filter_text, topic_text) in cases {
+            let mut index = TopicIndex::new();
+            let filter = TopicFilter::try_from(filter_text).unwrap();
+            let topic = TopicName::try_from(topic_text).unwrap();
+            let filter_matches = filter.matches(&topic);
+            index.insert(SessionId(1), filter);
+            assert_eq!(
+                index.matching(&topic).contains(&SessionId(1)),
+                filter_matches
+            );
+        }
+    }
 }
