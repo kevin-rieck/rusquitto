@@ -383,4 +383,22 @@ mod tests {
         index.remove(SessionId(1), &TopicFilter::try_from(filter).unwrap());
         assert!(index.root.children.is_empty());
     }
+
+    #[test]
+    fn removing_filter_preserves_sibling_subscription() {
+        let mut index = TopicIndex::new();
+        index.insert(SessionId(1), TopicFilter::try_from("sensors/temp").unwrap());
+        index.insert(
+            SessionId(2),
+            TopicFilter::try_from("sensors/humidity").unwrap(),
+        );
+        index.remove(
+            SessionId(1),
+            &TopicFilter::try_from("sensors/temp").unwrap(),
+        );
+        assert_eq!(
+            index.matching(&TopicName::try_from("sensors/humidity").unwrap()),
+            vec![SessionId(2)]
+        )
+    }
 }
