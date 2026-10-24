@@ -428,4 +428,14 @@ mod tests {
             vec![SessionId(2)]
         )
     }
+
+    #[test]
+    fn top_level_plus_wildcard_does_not_match_system_topic() {
+        let mut index = TopicIndex::new();
+        index.insert(SessionId(1), TopicFilter::try_from("+/uptime").unwrap());
+        assert_eq!(
+            index.matching(&TopicName::try_from("$SYS/uptime").unwrap()),
+            vec![]
+        )
+    }
 }
