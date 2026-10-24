@@ -401,4 +401,20 @@ mod tests {
             vec![SessionId(2)]
         )
     }
+
+    #[test]
+    fn removing_filter_preserves_hash_wildcard_subscription() {
+        let mut index = TopicIndex::new();
+        index.insert(SessionId(1), TopicFilter::try_from("sensors/temp").unwrap());
+        index.insert(SessionId(2), TopicFilter::try_from("sensors/#").unwrap());
+        index.remove(
+            SessionId(1),
+            &TopicFilter::try_from("sensors/temp").unwrap(),
+        );
+
+        assert_eq!(
+            index.matching(&TopicName::try_from("sensors/temp").unwrap()),
+            vec![SessionId(2)]
+        )
+    }
 }
