@@ -461,4 +461,18 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn index_combines_matches_from_multiple_filters() {
+        let mut index = TopicIndex::new();
+        index.insert(SessionId(1), TopicFilter::try_from("sensors/+").unwrap());
+        index.insert(SessionId(2), TopicFilter::try_from("sensors/#").unwrap());
+        index.insert(SessionId(3), TopicFilter::try_from("sensors/temp").unwrap());
+
+        let matches = index.matching(&TopicName::try_from("sensors/temp").unwrap());
+        assert_eq!(matches.len(), 3);
+        assert!(matches.contains(&SessionId(1)));
+        assert!(matches.contains(&SessionId(2)));
+        assert!(matches.contains(&SessionId(3)));
+    }
 }
