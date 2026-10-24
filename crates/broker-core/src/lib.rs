@@ -176,6 +176,7 @@ impl TopicIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
     fn valid_topic_name_is_accepted() {
@@ -524,5 +525,26 @@ mod tests {
             index.matching(&TopicName::try_from("sensors/temp").unwrap()),
             vec![SessionId(1)]
         );
+    }
+
+    proptest! {
+        #[test]
+        fn index_agrees_with_filter_for_generated_topics(
+            prefix in prop::sample::select(vec!["sensors", "$SYS", "other"]),
+            suffix in proptest::string::string_regex("[a-z]{0,5}(/[a-z]{0,5})?").unwrap(),
+            filter_prop in prop::sample::select(vec!["sensors/+", "sensors/#", "+/+", "#", "$SYS/#"]),
+        ) {
+            let topic_text = format!("{prefix}/{suffix}");
+            let topic = TopicName::try_from(topic_text.as_str()).unwrap();
+            let mut index = TopicIndex::new();
+            let filter = TopicFilter::try_from(filter_prop).unwrap();
+            let filter_matches = filter.matches(&topic);
+            index.insert(SessionId(1), filter);
+            prop_assert_eq!(
+                index.matching(&topic).contains(&SessionId(1)),
+                filter_matches
+            );
+        }
+
     }
 }
