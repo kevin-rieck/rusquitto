@@ -569,6 +569,20 @@ mod tests {
         assert_eq!(index, TopicIndex::new());
     }
 
+    #[test]
+    fn clear_has_no_effect_for_non_existing_session() {
+        let session_1 = SessionId(1);
+        let mut index = TopicIndex::new();
+        index.insert(session_1, TopicFilter::try_from("sensors/+").unwrap());
+        index.clear(SessionId(2));
+        assert_eq!(
+            index.matching(&TopicName::try_from("sensors/temp").unwrap()),
+            vec![session_1]
+        );
+        index.clear(session_1);
+        index.clear(session_1);
+        assert_eq!(index, TopicIndex::new());
+    }
     proptest! {
         #[test]
         fn index_agrees_with_filter_for_generated_topics(
