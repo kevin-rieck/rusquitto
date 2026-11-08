@@ -583,6 +583,20 @@ mod tests {
         index.clear(session_1);
         assert_eq!(index, TopicIndex::new());
     }
+
+    #[test]
+    fn overlapping_filter_does_not_return_multiple_subscriptions() {
+        let session_1 = SessionId(1);
+        let mut index = TopicIndex::new();
+        index.insert(session_1, TopicFilter::try_from("sensors/+").unwrap());
+        index.insert(session_1, TopicFilter::try_from("sensors/#").unwrap());
+
+        assert_eq!(
+            index.matching(&TopicName::try_from("sensors/temp").unwrap()),
+            vec![session_1]
+        );
+    }
+
     proptest! {
         #[test]
         fn index_agrees_with_filter_for_generated_topics(
