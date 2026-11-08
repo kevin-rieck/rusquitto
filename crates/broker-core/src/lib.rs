@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 #[derive(Debug, PartialEq)]
 pub struct TopicName(String);
 
@@ -170,6 +168,16 @@ impl TopicIndex {
         }
         let levels: Vec<_> = filter.0.split('/').collect();
         prune(&mut self.root, &levels, session_id);
+    }
+
+    pub fn clear(&mut self, session_id: SessionId) {
+        fn prune(node: &mut Node, session_id: SessionId) -> bool {
+            node.ids.retain(|id| *id != session_id);
+            node.children
+                .retain(|_level, child| !prune(child, session_id));
+            node.ids.is_empty() && node.children.is_empty()
+        }
+        prune(&mut self.root, session_id);
     }
 }
 
