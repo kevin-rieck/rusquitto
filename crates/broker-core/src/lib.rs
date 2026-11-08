@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 #[derive(Debug, PartialEq)]
 pub struct TopicName(String);
 
@@ -536,7 +538,7 @@ mod tests {
     }
 
     #[test]
-    fn clear_removes_all_indeces_from_a_session() {
+    fn clear_removes_all_subscriptions_for_a_session() {
         let session_1 = SessionId(1);
         let session_2 = SessionId(2);
         let mut index = TopicIndex::new();
@@ -563,6 +565,8 @@ mod tests {
             index.matching(&TopicName::try_from("sensors/humidity").unwrap()),
             vec![]
         );
+        index.clear(session_2);
+        assert_eq!(index, TopicIndex::new());
     }
 
     proptest! {
