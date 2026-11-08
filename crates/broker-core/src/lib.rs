@@ -527,6 +527,36 @@ mod tests {
         );
     }
 
+    #[test]
+    fn clear_removes_all_indeces_from_a_session() {
+        let session_1 = SessionId(1);
+        let session_2 = SessionId(2);
+        let mut index = TopicIndex::new();
+        index.insert(session_1, TopicFilter::try_from("sensors/temp").unwrap());
+        index.insert(
+            session_1,
+            TopicFilter::try_from("sensors/humidity").unwrap(),
+        );
+        index.insert(session_2, TopicFilter::try_from("sensors/temp").unwrap());
+        assert_eq!(
+            index.matching(&TopicName::try_from("sensors/temp").unwrap()),
+            vec![session_1, session_2]
+        );
+        assert_eq!(
+            index.matching(&TopicName::try_from("sensors/humidity").unwrap()),
+            vec![session_1]
+        );
+        index.clear(session_1);
+        assert_eq!(
+            index.matching(&TopicName::try_from("sensors/temp").unwrap()),
+            vec![session_2]
+        );
+        assert_eq!(
+            index.matching(&TopicName::try_from("sensors/humidity").unwrap()),
+            vec![]
+        );
+    }
+
     proptest! {
         #[test]
         fn index_agrees_with_filter_for_generated_topics(
