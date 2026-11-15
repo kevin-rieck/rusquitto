@@ -26,6 +26,12 @@ struct Node {
     ids: Vec<SessionId>,
 }
 
+#[derive(Debug, Default)]
+pub struct RoutingShard {
+    registered_sessions: Vec<SessionId>,
+    next_id: u64,
+}
+
 impl TryFrom<&str> for TopicName {
     type Error = TopicNameError;
 
@@ -182,6 +188,26 @@ impl TopicIndex {
             node.ids.is_empty() && node.children.is_empty()
         }
         prune(&mut self.root, session_id);
+    }
+}
+
+impl RoutingShard {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn has_session(&self, session_id: SessionId) -> bool {
+        self.registered_sessions.contains(&session_id)
+    }
+
+    pub fn open_session(&mut self) -> SessionId {
+        let session_id = SessionId(self.next_id);
+        self.next_id = self
+            .next_id
+            .checked_add(1)
+            .expect("session ID space exhausted");
+        self.registered_sessions.push(session_id);
+        session_id
     }
 }
 
@@ -601,6 +627,15 @@ mod tests {
         );
     }
 
+    #[test]
+    fn opening_sessions_registers_distinct_ids() {
+        let mut shard = RoutingShard::new();
+        let session_1 = shard.open_session();
+        let session_2 = shard.open_session();
+        assert_ne!(session_1, session_2);
+        assert!(shard.has_session(session_1));
+        assert!(shard.has_session(session_2));
+    }
     proptest! {
         #[test]
         fn index_agrees_with_filter_for_generated_topics(
