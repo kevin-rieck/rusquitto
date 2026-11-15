@@ -209,6 +209,11 @@ impl RoutingShard {
         self.registered_sessions.push(session_id);
         session_id
     }
+
+    pub fn close_session(&mut self, session_id: SessionId) {
+        self.registered_sessions
+            .retain(|session| *session != session_id);
+    }
 }
 
 #[cfg(test)]
@@ -641,6 +646,16 @@ mod tests {
     fn new_shard_has_no_registered_sessions() {
         let shard = RoutingShard::new();
         assert!(!shard.has_session(SessionId(1)));
+    }
+
+    #[test]
+    fn closing_session_preserves_other_sessions() {
+        let mut shard = RoutingShard::new();
+        let session_1 = shard.open_session();
+        let session_2 = shard.open_session();
+        shard.close_session(session_1);
+        assert!(shard.has_session(session_2));
+        assert!(!shard.has_session(session_1));
     }
 
     proptest! {
