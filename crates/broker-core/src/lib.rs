@@ -636,6 +636,13 @@ mod tests {
         assert!(shard.has_session(session_1));
         assert!(shard.has_session(session_2));
     }
+
+    #[test]
+    fn new_shard_has_no_registered_sessions() {
+        let shard = RoutingShard::new();
+        assert!(!shard.has_session(SessionId(1)));
+    }
+
     proptest! {
         #[test]
         fn index_agrees_with_filter_for_generated_topics(
