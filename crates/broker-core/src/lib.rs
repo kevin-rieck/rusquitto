@@ -12,7 +12,7 @@ pub struct TopicFilter(String);
 #[derive(Debug, PartialEq)]
 pub struct TopicFilterError;
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
 pub struct SessionId(u64);
 
 #[derive(Debug, PartialEq, Default)]
@@ -146,6 +146,8 @@ impl TopicIndex {
         let levels: Vec<_> = topic.0.split('/').collect();
         let mut ids = Vec::new();
         visit(&self.root, &levels, true, &mut ids);
+        ids.sort_unstable();
+        ids.dedup();
         ids
     }
 
