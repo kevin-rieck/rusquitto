@@ -7,6 +7,9 @@ pub struct TopicName(String);
 pub struct TopicNameError;
 
 #[derive(Debug, PartialEq)]
+pub struct UnknownSession;
+
+#[derive(Debug, PartialEq)]
 pub struct TopicFilter(String);
 
 #[derive(Debug, PartialEq)]
@@ -30,6 +33,7 @@ struct Node {
 pub struct RoutingShard {
     registered_sessions: Vec<SessionId>,
     next_id: u64,
+    topic_index: TopicIndex,
 }
 
 impl TryFrom<&str> for TopicName {
@@ -213,6 +217,22 @@ impl RoutingShard {
     pub fn close_session(&mut self, session_id: SessionId) {
         self.registered_sessions
             .retain(|session| *session != session_id);
+    }
+
+    pub fn matching(&self, topic: &TopicName) -> Vec<SessionId> {
+        self.topic_index.matching(topic)
+    }
+
+    pub fn subscribe(
+        &mut self,
+        session_id: SessionId,
+        filter: TopicFilter,
+    ) -> Result<(), UnknownSession> {
+        if !self.has_session(session_id) {
+            return Err(UnknownSession);
+        }
+        self.topic_index.insert(session_id, filter);
+        Ok(())
     }
 }
 
@@ -680,6 +700,15 @@ mod tests {
         assert!(!shard.has_session(session_1));
     }
 
+    #[test]
+    fn registered_sessions_can_subscribe() {
+        let mut shard = RoutingShard::new();
+        let session_1 = shard.open_session();
+        let filter_1 = TopicFilter::try_from("sensors/+").unwrap();
+        let topic_1 = TopicName::try_from("sensors/temp").unwrap();
+        assert_eq!(shard.subscribe(session_1, filter_1), Ok(()));
+        assert_eq!(shard.matching(&topic_1), vec![session_1]);
+    }
     proptest! {
         #[test]
         fn index_agrees_with_filter_for_generated_topics(
