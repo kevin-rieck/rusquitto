@@ -669,6 +669,17 @@ mod tests {
         assert!(!shard.has_session(session_1));
     }
 
+    #[test]
+    fn session_ids_are_not_reused_after_close() {
+        let mut shard = RoutingShard::new();
+        let session_1 = shard.open_session();
+        shard.close_session(session_1);
+        let session_2 = shard.open_session();
+        assert_ne!(session_1, session_2);
+        assert!(shard.has_session(session_2));
+        assert!(!shard.has_session(session_1));
+    }
+
     proptest! {
         #[test]
         fn index_agrees_with_filter_for_generated_topics(
