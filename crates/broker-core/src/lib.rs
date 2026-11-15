@@ -589,13 +589,15 @@ mod tests {
     #[test]
     fn overlapping_filter_does_not_return_multiple_subscriptions() {
         let session_1 = SessionId(1);
+        let session_2 = SessionId(2);
         let mut index = TopicIndex::new();
         index.insert(session_1, TopicFilter::try_from("sensors/+").unwrap());
         index.insert(session_1, TopicFilter::try_from("sensors/#").unwrap());
+        index.insert(session_2, TopicFilter::try_from("sensors/#").unwrap());
 
         assert_eq!(
             index.matching(&TopicName::try_from("sensors/temp").unwrap()),
-            vec![session_1]
+            vec![session_1, session_2]
         );
     }
 
