@@ -658,6 +658,17 @@ mod tests {
         assert!(!shard.has_session(session_1));
     }
 
+    #[test]
+    fn closing_session_twice_preserves_other_sessions() {
+        let mut shard = RoutingShard::new();
+        let session_1 = shard.open_session();
+        let session_2 = shard.open_session();
+        shard.close_session(session_1);
+        shard.close_session(session_1);
+        assert!(shard.has_session(session_2));
+        assert!(!shard.has_session(session_1));
+    }
+
     proptest! {
         #[test]
         fn index_agrees_with_filter_for_generated_topics(
